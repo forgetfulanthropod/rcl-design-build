@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+  --color-bg: #141210;
+  --color-surface: #1e1b17;
+  --color-raised: #2a251f;
+  --color-fg: #f3eee4;
+  --color-muted: #b3a898;
+  --color-line: #3a342c;
+  --color-copper: #e08a45;
+  --color-ink: #141210;
+  --color-pine: #8fbfa4;
+  --color-danger: #e07a6a;
+  --radius-md: 0.75rem;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  body {
+    min-height: 100dvh;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  ::selection {
+    background: var(--color-copper);
+    color: var(--color-ink);
+  }
+}
+
+@layer components {
+  .field {
+    height: 2.75rem;
+    width: 100%;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-line);
+    background: var(--color-bg);
+    color: var(--color-fg);
+    padding-inline: 0.75rem;
+    outline: none;
+  }
+  .field:focus {
+    border-color: var(--color-copper);
+  }
+  textarea.field {
+    height: auto;
+    min-height: 5.5rem;
+    padding-block: 0.7rem;
+  }
+}
