@@ -79,8 +79,43 @@ function inLivePreview(): boolean {
   );
 }
 
+function framed(): boolean {
+  try {
+    return window.self !== window.top;
+  } catch {
+    return true;
+  }
+}
+
 /** Message the popup posts back to the opener once sign-in completes. */
 type PopupMessage = { source: "grok-auth-popup"; token: string | null; error?: string };
+
+function authPopupUrl(providerId: string): string {
+  return `${window.location.origin}/auth/popup?providerId=${encodeURIComponent(providerId)}`;
+}
+
+/**
+ * A new tab, not a sized pop-up. Android WebViews block `window.open` when the
+ * third argument asks for a popup window.
+ */
+function openAuthTab(url: string): Window | null {
+  const tab = window.open(url, "_blank");
+  if (!tab || tab.closed) return null;
+  return tab;
+}
+
+/** Leave the embedded preview for a real top-level Google page. */
+function leaveFor(url: string): void {
+  try {
+    if (window.top) {
+      window.top.location.assign(url);
+      return;
+    }
+  } catch {
+    /* The frame is sandboxed. Fall through to this frame. */
+  }
+  window.location.assign(url);
+}
 
 /**
  * Start sign-in with one upstream provider (`providerId` from `GROK_PROVIDERS`),
@@ -103,10 +138,10 @@ export async function signIn(
   const callbackURL = opts.callbackURL ?? "/";
   const errorCallbackURL = opts.errorCallbackURL ?? "/";
 
-  // Open the popup SYNCHRONOUSLY on the user gesture — before any await
-  // (including signOut). Awaiting first drops user-gesture privilege in some
-  // browsers when the opener is a cross-origin live-preview iframe.
-  const popup = inLivePreview() ? openSignInPopup(providerId) : null;
+  // Open the tab SYNCHRONOUSLY on the user gesture — before any await
+  // (including signOut). Awaiting first drops user-gesture privilege, and a
+  // sized popup is blocked on phones.
+  const popup = inLivePreview() ? openAuthTab(authPopupUrl(providerId)) : null;
 
   // Clear any prior session so switching providers actually switches identity.
   // Bounded because the popup is already open — a request that never settles
@@ -121,7 +156,10 @@ export async function signIn(
   });
 
   if (inLivePreview()) {
-    if (!popup) throw new Error("Pop-up blocked — allow pop-ups for sign-in");
+    if (!popup) {
+      leaveFor(authPopupUrl(providerId));
+      return;
+    }
     const token = await waitForPopupToken(popup);
     if (!token) throw new Error("Sign-in was cancelled or failed");
     setBearerToken(token);
@@ -149,24 +187,11 @@ export async function signIn(
     errorCallbackURL,
   });
   if (error) throw new Error(error.message ?? "Sign-in failed");
-  if (data?.url) window.location.href = data.url;
-}
-
-/**
- * Open `/auth/popup` in a new window. Must run synchronously inside the click
- * handler (no await before this). The path is served by the template Vite
- * plugin (`authPopupPlugin` in vite.config.ts) — NOT by a React route.
- *
- * Opens the real URL directly (not about:blank → assign). From a cross-origin
- * iframe the about:blank dance often fails on the first click and the window
- * ends up showing the app shell.
- */
-function openSignInPopup(providerId: string): Window | null {
-  const origin = window.location.origin;
-  const url = `${origin}/auth/popup?providerId=${encodeURIComponent(providerId)}`;
-  // Unique name per attempt so a prior attempt stuck on the SPA is not reused.
-  const name = `grok-signin-${Date.now()}`;
-  return window.open(url, name, "popup,width=500,height=650");
+  if (data?.url) {
+    // Google refuses to load inside the chat frame. Break out when embedded.
+    if (framed()) leaveFor(data.url);
+    else window.location.assign(data.url);
+  }
 }
 
 /**

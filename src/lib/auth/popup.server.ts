@@ -14,7 +14,7 @@
  * Wired automatically by the Vite `authPopupPlugin` in `vite.config.ts` during
  * `npm run dev` (live preview). Do NOT create `src/routes/auth/popup.tsx` — a
  * React route here paints the full app shell in the popup. The opener lives in
- * `client.ts` (`signIn` → `openSignInPopup`).
+ * `client.ts` (`signIn` → `openAuthTab`).
  */
 import { auth, SESSION_TOKEN_COOKIE } from "./server";
 
@@ -150,7 +150,21 @@ function completionHtml(message: PopupMessage): string {
   try {
     if (window.opener) window.opener.postMessage(msg, window.location.origin);
   } catch (e) {}
+  var key = "grok-auth.bearer-token";
+  function finishHere() {
+    if (msg.token) {
+      try { sessionStorage.setItem(key, msg.token); } catch (e) {}
+      location.replace("/");
+      return;
+    }
+    location.replace("/login");
+  }
+  if (!window.opener) {
+    finishHere();
+    return;
+  }
   try { window.close(); } catch (e) {}
+  setTimeout(finishHere, 600);
 })();
 </script>
 </body>

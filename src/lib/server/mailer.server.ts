@@ -1,6 +1,7 @@
 // Transactional email via Resend (https://resend.com/docs/api-reference/emails/send-email).
 // Env: RESEND_API_KEY (secret), MAIL_FROM (e.g. "RCL <login@example.com>"), APP_ORIGIN (e.g. "https://rcl.grok.me").
 // Never log message bodies or the API key.
+import { getRequest } from "@tanstack/react-start/server";
 import type { Sql } from "@/lib/db";
 import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
 import { DEMO_COMPANY_ID } from "@/lib/demo";
@@ -15,10 +16,29 @@ export function appOrigin(): string {
   return (process.env.APP_ORIGIN ?? "").replace(/\/+$/, "");
 }
 
-/** Turns "/m/abc" into an absolute URL using APP_ORIGIN (left relative if unset). */
+/** Origin of the current request, when APP_ORIGIN is not set. */
+function requestOrigin(): string {
+  try {
+    const request = getRequest();
+    if (!request) return "";
+    const url = new URL(request.url);
+    const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ?? "";
+    const host = forwardedHost || request.headers.get("host") || url.host;
+    if (!host || /[\s/]/.test(host)) return url.origin;
+    const protoHeader = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+    const proto = protoHeader === "http" || protoHeader === "https" ? protoHeader : url.protocol.replace(":", "");
+    return `${proto}://${host}`;
+  } catch {
+    return "";
+  }
+}
+
+/** Turns "/m/abc" into an absolute URL. Uses APP_ORIGIN, then the request host. */
 export function absoluteUrl(path: string): string {
   if (/^https?:\/\//.test(path)) return path;
-  return `${appOrigin()}${path.startsWith("/") ? path : `/${path}`}`;
+  const origin = appOrigin() || requestOrigin();
+  const normalized = path.startsWith("/") ? path : `/${path}`;
+  return origin ? `${origin}${normalized}` : normalized;
 }
 
 function escapeHtml(value: string): string {
