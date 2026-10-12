@@ -222,7 +222,7 @@ async function loadConfig(sql: Sql, companyId: string) {
   return { copy, workflows, copySource, workflowSource };
 }
 
-async function seedSample(sql: Sql, companyId: string, userId: string) {
+export async function seedSample(sql: Sql, companyId: string, userId: string) {
   const projectId = randomUUID();
   await sql`
     insert into projects (

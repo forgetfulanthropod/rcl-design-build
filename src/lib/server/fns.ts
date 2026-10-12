@@ -276,3 +276,26 @@ export const getStaging = createServerFn({ method: "GET" })
     const { getStaging: run } = await import("./data.server");
     return run(data);
   });
+
+/** Whether debug role sign-in is on (DEBUG_LOGIN=true on the server). */
+export const getDebugLogin = createServerFn({ method: "GET" }).handler(async () => {
+  const { debugLoginEnabled, ensureDemoCompany, DEBUG_ROLES } = await import("./debug-login.server");
+  if (!debugLoginEnabled()) return { enabled: false, roles: [] as string[] };
+  await ensureDemoCompany();
+  return { enabled: true, roles: [...DEBUG_ROLES] as string[] };
+});
+
+/** Debug-only: sign in as a seeded demo user. Refused unless DEBUG_LOGIN=true on the server. */
+export const debugSignIn = createServerFn({ method: "POST" })
+  .validator((input: { role: string }) => ({ role: required(input?.role, 20, "Role") }))
+  .handler(async ({ data }) => {
+    const { debugSignIn: run } = await import("./debug-login.server");
+    return run(data.role);
+  });
+
+/** Debug-only: wipe and re-seed the demo company. Refused when DEBUG_LOGIN=false. */
+export const resetDemoData = createServerFn({ method: "POST" }).handler(async () => {
+  const { resetDemoCompany } = await import("./debug-login.server");
+  await resetDemoCompany();
+  return { ok: true };
+});
