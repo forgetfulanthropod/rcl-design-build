@@ -1,30 +1,35 @@
 import { useEffect, useState } from "react";
-import { Bot, Building2, LayoutDashboard, Radio, Users, Wrench } from "lucide-react";
+import { AlertTriangle, ClipboardList, History, NotebookPen, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
-import { CommsView, CrewView, DeskHome, FieldView, ForemanView, JobsView } from "@/components/desk-views";
+import { CrewView } from "@/components/desk-views";
+import { TodayReport } from "@/components/today-report";
+import { AttentionView, MyReports, ReportsReview } from "@/components/reports-views";
+import { can, type NavId } from "@/lib/permissions";
 import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
 
 type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
-type View = "desk" | "jobs" | "field" | "comms" | "foreman" | "crew";
+type View = NavId | "team";
 
-const NAV: { id: View; label: string; icon: typeof Bot }[] = [
-  { id: "desk", label: "Desk", icon: LayoutDashboard },
-  { id: "jobs", label: "Jobs", icon: Building2 },
-  { id: "field", label: "Site", icon: Wrench },
-  { id: "comms", label: "Log", icon: Radio },
-  { id: "foreman", label: "Foreman", icon: Bot },
-  { id: "crew", label: "Crew", icon: Users },
+// Slimmed to daily reports. The older desk views (Desk home, Jobs, Site/dispatch board, work orders,
+// RFIs, change orders, milestones, contract values, Log, Foreman) are hidden from navigation; their
+// components and server functions remain in desk-views.tsx / data.server.ts and their tables are untouched.
+const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
+  { id: "today", label: "Today", icon: NotebookPen },
+  { id: "mine", label: "My reports", icon: History },
+  { id: "reports", label: "Reports", icon: ClipboardList },
+  { id: "attention", label: "Attention", icon: AlertTriangle },
 ];
 
 export function DeskApp() {
   const [data, setData] = useState<DeskResult | null>(null);
   const [error, setError] = useState("");
-  const [view, setView] = useState<View>("desk");
+  const [view, setView] = useState<View | "">("");
+  const [focus, setFocus] = useState({ id: "", day: "" });
   const [attempt, setAttempt] = useState(0);
   const online = useOnline();
 
@@ -79,9 +84,9 @@ export function DeskApp() {
   const nav = navFor(ready.profile.role)
     .map((id) => NAV.find((item) => item.id === id))
     .filter((item): item is (typeof NAV)[number] => Boolean(item));
-  const current = nav.some((item) => item.id === view) ? view : "desk";
-  const label = current === "jobs" ? ready.copy.jobsLabel : current === "field" ? ready.copy.fieldLabel : NAV.find((item) => item.id === current)?.label;
-  
+  const canTeam = can(ready.profile.role, "crew.invite");
+  const current: View = view === "team" && canTeam ? "team" : nav.some((item) => item.id === view) ? (view as NavId) : (nav[0]?.id ?? "today");
+  const label = current === "team" ? "Team" : NAV.find((item) => item.id === current)?.label;
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
@@ -101,11 +106,22 @@ export function DeskApp() {
       </aside>
       <div className="flex min-w-0 flex-col pb-20 md:pb-0">
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate font-display text-2xl">{label}</p>
+          <div className="shrink-0">
+            <p className="font-display text-2xl">{label}</p>
             <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
           </div>
-          <UserButton />
+          <div className="flex min-w-0 items-center gap-2">
+            {canTeam ? (
+              <button
+                type="button"
+                onClick={() => setView("team")}
+                className={`inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "team" ? "text-copper" : "text-muted"}`}
+              >
+                <Users className="size-4" aria-hidden="true" /> Team
+              </button>
+            ) : null}
+            <UserButton />
+          </div>
         </header>
         <OfflineBadge online={online} />
         {error ? (
@@ -114,12 +130,18 @@ export function DeskApp() {
           </div>
         ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          {current === "desk" ? <DeskHome data={ready} open={setView} /> : null}
-          {current === "jobs" ? <JobsView data={ready} commit={commit} /> : null}
-          {current === "field" ? <FieldView data={ready} commit={commit} /> : null}
-          {current === "comms" ? <CommsView data={ready} /> : null}
-          {current === "foreman" ? <ForemanView data={ready} commit={commit} /> : null}
-          {current === "crew" ? <CrewView data={ready} commit={commit} /> : null}
+          {current === "today" ? <TodayReport /> : null}
+          {current === "mine" ? <MyReports /> : null}
+          {current === "reports" ? <ReportsReview key={`${focus.id}-${focus.day}`} focus={focus.id} initialDay={focus.day} /> : null}
+          {current === "attention" ? (
+            <AttentionView
+              openReport={(id, day) => {
+                setFocus({ id, day });
+                setView("reports");
+              }}
+            />
+          ) : null}
+          {current === "team" ? <CrewView data={ready} commit={commit} /> : null}
         </div>
       </div>
       <nav

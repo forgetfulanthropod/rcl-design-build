@@ -48,9 +48,8 @@ test("unknown role can do nothing", () => {
 
 test("nav never exceeds 5 tabs and field roles get 3", () => {
   for (const r of ROLES) assert.ok(navFor(r).length <= 5, r);
-  assert.deepEqual(navFor("labor"), ["desk", "field", "comms"]);
-  assert.ok(!navFor("lead").includes("foreman"));
-  assert.ok(navFor("superadmin").includes("foreman"));
+  for (const r of ["labor", "sub", "lead"]) assert.deepEqual(navFor(r), ["today", "mine"], r);
+  for (const r of ["owner", "admin", "superadmin"]) assert.deepEqual(navFor(r), ["reports", "attention"], r);
 });
 
 test("invitable roles", () => {
@@ -71,4 +70,10 @@ test("redactForRole strips dollars for labor and sub only", () => {
   const owner = redactForRole("owner", data);
   assert.equal(owner.projects[0].contractValue, 125000);
   assert.equal(data.projects[0].contractValue, 125000, "input not mutated");
+});
+
+test("daily reports: everyone writes, only principals review", () => {
+  for (const r of ["labor", "sub", "lead", "owner", "admin", "superadmin"]) assert.ok(can(r, "report.write"), r);
+  for (const r of ["labor", "sub", "lead"]) assert.ok(!can(r, "report.review"), r);
+  for (const r of ["owner", "admin", "superadmin"]) assert.ok(can(r, "report.review"), r);
 });

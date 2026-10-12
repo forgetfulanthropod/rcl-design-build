@@ -66,23 +66,14 @@ async function signInAs(browser: import("@playwright/test").Browser, role: strin
 
 test("demo edits are saved, reset re-seeds, and the demo is isolated from real companies", async ({ browser }) => {
   test.skip(!ON, "DEBUG_LOGIN is off");
-  const { ctx, page } = await signInAs(browser, "admin");
-  await page.getByRole("button", { name: "Jobs", exact: true }).locator("visible=true").first().click();
-  await expect(page.getByText("Whitaker kitchen remodel").first()).toBeVisible();
-  // A real (non-demo) company's data must not show up in the demo.
-  await expect(page.getByText("Lexington kitchen").first()).toBeVisible(); // demo's own sample job
-  const job = `Demo edit ${Date.now().toString(36)}`;
-  await page.getByRole("button", { name: /new job/i }).first().click();
-  await page.getByPlaceholder("Job name").fill(job);
-  await page.getByPlaceholder("Client").fill("Demo client");
-  await page.getByPlaceholder("Address").fill("1 Demo St");
-  await page.getByRole("button", { name: "Save job" }).click();
-  await expect(page.getByText(job).first()).toBeVisible();
+  const note = `Demo edit ${Date.now().toString(36)}`;
+  const { ctx, page } = await signInAs(browser, "labor");
+  await page.locator("#narrative").fill(note);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Saved", exact: true })).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "Jobs", exact: true }).locator("visible=true").first().click();
-  await expect(page.getByText(job).first()).toBeVisible(); // persisted
+  await expect(page.locator("#narrative")).toHaveValue(note); // persisted
 
-  // Reset from the login page in a signed-out context.
   const anon = await browser.newContext();
   const lp = await anon.newPage();
   await lp.goto("/login");
@@ -92,28 +83,21 @@ test("demo edits are saved, reset re-seeds, and the demo is isolated from real c
   await anon.close();
   await ctx.close();
 
-  const again = await signInAs(browser, "admin");
-  await again.page.getByRole("button", { name: "Jobs", exact: true }).locator("visible=true").first().click();
-  await expect(again.page.getByText("Whitaker kitchen remodel").first()).toBeVisible();
-  await expect(again.page.getByText(job)).toHaveCount(0);
+  const again = await signInAs(browser, "labor");
+  await expect(again.page.locator("#narrative")).toHaveValue("");
+  await again.page.getByRole("button", { name: "My reports", exact: true }).locator("visible=true").first().click();
+  await expect(again.page.getByTestId("report-card").first()).toBeVisible();
   await again.ctx.close();
 });
 
 test("a real company never sees demo data", async ({ browser }) => {
   test.skip(!ON, "DEBUG_LOGIN is off");
-  const { newAdmin } = await import("./helpers");
+  const { newAdmin, openView } = await import("./helpers");
   const { page, context } = await newAdmin(browser);
-  await page.getByRole("button", { name: "Jobs", exact: true }).locator("visible=true").first().click();
-  await expect(page.getByText("Whitaker kitchen remodel")).toHaveCount(0);
-  await page.getByRole("button", { name: "Crew", exact: true }).locator("visible=true").first().click();
+  await page.getByRole("button", { name: "7 days" }).click();
+  await expect(page.getByText(/No reports for this filter/)).toBeVisible();
+  await expect(page.getByText("Whitaker")).toHaveCount(0);
+  await openView(page, "Team");
   await expect(page.getByText("Luis Moreno")).toHaveCount(0);
   await context.close();
-});
-
-test("labor persona sees the activities assigned to them", async ({ browser }) => {
-  test.skip(!ON, "DEBUG_LOGIN is off");
-  const { ctx, page } = await signInAs(browser, "labor");
-  await page.getByRole("button", { name: "Site", exact: true }).locator("visible=true").first().click();
-  await expect(page.getByText("Set base cabinets, east wall").first()).toBeVisible();
-  await ctx.close();
 });

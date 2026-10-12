@@ -40,8 +40,9 @@ async function audit(page: Page) {
   });
 }
 
+// Superseded by e2e/slim.spec.ts: these views (Desk, Site board, Jobs, Log) are hidden in the slim app.
 for (const vp of VIEWPORTS) {
-  test(`employee mobile views ${vp.width}x${vp.height}`, async ({ browser }) => {
+  test.skip(`employee mobile views ${vp.width}x${vp.height}`, async ({ browser }) => {
     mkdirSync(OUT, { recursive: true });
     const tag = `${vp.width}x${vp.height}`;
     const report: Record<string, unknown> = {};

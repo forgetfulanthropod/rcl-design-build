@@ -299,3 +299,123 @@ export const resetDemoData = createServerFn({ method: "POST" }).handler(async ()
   await resetDemoCompany();
   return { ok: true };
 });
+
+// ---------- daily reports ----------
+
+function dayArg(value: unknown): string {
+  const day = required(value, 10, "Day");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("Pick a day.");
+  return day;
+}
+
+async function reportsFor(userId: string) {
+  const { getSql } = await import("@/lib/db");
+  const { member } = await import("./reports.server");
+  const { assertCan } = await import("@/lib/permissions");
+  const me = await member(await getSql(), userId);
+  return { me, assertCan };
+}
+
+export const getMyReport = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string }) => ({ day: dayArg(input?.day) }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.write");
+    const { getMyReport: run } = await import("./reports.server");
+    return run(context.userId, data.day);
+  });
+
+export const saveMyReport = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; narrative: string; projectId: string }) => ({
+    day: dayArg(input?.day),
+    narrative: typeof input?.narrative === "string" ? input.narrative.slice(0, 8000) : "",
+    projectId: optional(input?.projectId, 80),
+  }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.write");
+    const { saveMyReport: run } = await import("./reports.server");
+    return run(context.userId, data);
+  });
+
+export const addMyPhoto = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; image: string; thumb: string; width: number; height: number; takenAt: string }) => {
+    if (typeof input?.image !== "string" || input.image.length > 4_500_000) throw new Error("That photo is too large.");
+    if (typeof input?.thumb !== "string" || input.thumb.length > 300_000) throw new Error("That photo is too large.");
+    return {
+      day: dayArg(input.day),
+      image: input.image,
+      thumb: input.thumb,
+      width: Number(input.width) || 0,
+      height: Number(input.height) || 0,
+      takenAt: optional(input.takenAt, 40),
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.write");
+    const { addMyPhoto: run } = await import("./reports.server");
+    return run(context.userId, data);
+  });
+
+export const submitMyReport = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; lunchMinutes: number }) => ({ day: dayArg(input?.day), lunchMinutes: Number(input?.lunchMinutes) }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.write");
+    const { submitMyReport: run } = await import("./reports.server");
+    return run(context.userId, data);
+  });
+
+export const listMyReports = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.write");
+    const { listMyReports: run } = await import("./reports.server");
+    return run(context.userId);
+  });
+
+export const reviewReports = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { from: string; to: string; projectId: string; personId: string }) => ({
+    from: dayArg(input?.from),
+    to: dayArg(input?.to),
+    projectId: optional(input?.projectId, 80),
+    personId: optional(input?.personId, 80),
+  }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.review");
+    const { reviewReports: run } = await import("./reports.server");
+    return run(context.userId, data);
+  });
+
+export const getAttention = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { from: string; to: string; refresh?: boolean }) => ({
+    from: dayArg(input?.from),
+    to: dayArg(input?.to),
+    refresh: Boolean(input?.refresh),
+  }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.review");
+    const { attentionSummary } = await import("./reports.server");
+    const { askModel } = await import("./data.server");
+    return attentionSummary(context.userId, data, (system, message) => askModel(system, [], message));
+  });
+
+export const getReportPhoto = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Photo") }))
+  .handler(async ({ data, context }) => {
+    const { readPhoto } = await import("./reports.server");
+    const photo = await readPhoto(context.userId, data.id);
+    if (!photo) throw new Error("Photo not found.");
+    return { url: `data:${photo.mime};base64,${photo.bytes.toString("base64")}` };
+  });

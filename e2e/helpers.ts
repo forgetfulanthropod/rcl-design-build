@@ -26,7 +26,7 @@ export async function newAdmin(browser: Browser, opts: { viewport?: { width: num
   await expect(page.getByRole("button", { name: "Create the desk" })).toBeVisible();
   await page.locator("#setup-co").fill(`Co ${id}`);
   await page.getByRole("button", { name: "Create the desk" }).click();
-  await expect(page.getByRole("button", { name: "Crew" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Team" }).first()).toBeVisible();
   return { context, page, id };
 }
 
@@ -52,7 +52,7 @@ export async function createJob(page: Page, name: string) {
 
 /** Invite a crew member by email; returns the single-use link the dev fallback shows. */
 export async function inviteByEmail(page: Page, name: string, email: string, role = "labor") {
-  await openView(page, "Crew");
+  await openView(page, "Team");
   await page.getByRole("button", { name: "Email", exact: true }).click();
   await page.getByPlaceholder("Name").fill(name);
   await page.getByPlaceholder("Email").fill(email);
