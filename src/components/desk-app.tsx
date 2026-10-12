@@ -5,6 +5,7 @@ import { completeSetup, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button } from "@/components/ui";
 import { CommsView, CrewView, DeskHome, FieldView, ForemanView, JobsView } from "@/components/desk-views";
+import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
 
 type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
 type View = "desk" | "jobs" | "field" | "comms" | "foreman" | "crew";
@@ -12,8 +13,8 @@ type View = "desk" | "jobs" | "field" | "comms" | "foreman" | "crew";
 const NAV: { id: View; label: string; icon: typeof Bot }[] = [
   { id: "desk", label: "Desk", icon: LayoutDashboard },
   { id: "jobs", label: "Jobs", icon: Building2 },
-  { id: "field", label: "Field", icon: Wrench },
-  { id: "comms", label: "Radio", icon: Radio },
+  { id: "field", label: "Site", icon: Wrench },
+  { id: "comms", label: "Log", icon: Radio },
   { id: "foreman", label: "Foreman", icon: Bot },
   { id: "crew", label: "Crew", icon: Users },
 ];
@@ -53,7 +54,16 @@ export function DeskApp() {
       </main>
     );
   }
-  if (data.needsSetup) return <Setup email={data.email} suggestedName={data.suggestedName} commit={commit} />;
+  if (data.needsSetup) {
+    return (
+      <Setup
+        email={data.email}
+        suggestedName={data.suggestedName}
+        superAdmin={data.superAdmin}
+        commit={commit}
+      />
+    );
+  }
 
   const ready = data;
   const label = view === "jobs" ? ready.copy.jobsLabel : view === "field" ? ready.copy.fieldLabel : NAV.find((item) => item.id === view)?.label;
@@ -138,31 +148,41 @@ function NavButton({
 function Setup({
   email,
   suggestedName,
+  superAdmin,
   commit,
 }: {
   email: string;
   suggestedName: string;
+  superAdmin: boolean;
   commit: (work: Promise<DeskResult>) => Promise<void>;
 }) {
-  const [name, setName] = useState(suggestedName);
-  const [companyName, setCompanyName] = useState("RCL Design-Build");
-  const [phone, setPhone] = useState("");
+  const [name, setName] = useState(superAdmin ? "Elvira" : suggestedName);
+  const [companyName, setCompanyName] = useState("RCL Design Build");
+  const [phone, setPhone] = useState(superAdmin ? SUPER_ADMIN_PHONE_DISPLAY : "");
   const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState("");
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center px-5 py-10">
       <div className="flex items-center gap-3">
         <Mark />
-        <h1 className="text-3xl">Open your company</h1>
+        <h1 className="text-3xl">{superAdmin ? "Open Elvira's desk" : "Open your company"}</h1>
       </div>
       <p className="mt-3 text-sm leading-relaxed text-muted">
-        You are the first admin on this account{email ? ` (${email})` : ""}. Add a mobile number if
-        you want Foreman to text staging links, not only email them.
+        {superAdmin
+          ? `This sign-in is the super-admin line ${SUPER_ADMIN_PHONE_DISPLAY}. You join as Elvira. Foreman texts this number before a product change goes live.`
+          : `You join as an admin${email ? ` (${email})` : ""}. Elvira (${SUPER_ADMIN_PHONE_DISPLAY}) is the super admin. Foreman texts her before a product change goes live. Add your own mobile if you want crew texts, not hers.`}
       </p>
       <label className="mt-6 text-sm text-muted" htmlFor="setup-name">
         Your name
       </label>
-      <input id="setup-name" className="field mt-1" value={name} onChange={(e) => setName(e.target.value)} />
+      <input
+        id="setup-name"
+        className="field mt-1"
+        value={name}
+        disabled={superAdmin}
+        onChange={(e) => setName(e.target.value)}
+      />
       <label className="mt-4 text-sm text-muted" htmlFor="setup-co">
         Company
       </label>
@@ -173,19 +193,26 @@ function Setup({
         onChange={(e) => setCompanyName(e.target.value)}
       />
       <label className="mt-4 text-sm text-muted" htmlFor="setup-phone">
-        Mobile for texts, optional
+        {superAdmin ? "Super-admin mobile" : "Your mobile, optional"}
       </label>
       <input
         id="setup-phone"
         className="field mt-1"
         inputMode="tel"
         value={phone}
+        disabled={superAdmin}
         onChange={(e) => setPhone(e.target.value)}
       />
+      {localError ? <p className="mt-3 text-sm text-danger">{localError}</p> : null}
       <Button
         className="mt-5"
         disabled={busy}
         onClick={() => {
+          if (!superAdmin && samePhone(phone)) {
+            setLocalError(`That number is Elvira's (${SUPER_ADMIN_PHONE_DISPLAY}). Use your own, or leave it blank.`);
+            return;
+          }
+          setLocalError("");
           setBusy(true);
           void commit(completeSetup({ data: { name, companyName, phone } })).finally(() => setBusy(false));
         }}

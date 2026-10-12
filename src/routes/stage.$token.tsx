@@ -50,7 +50,7 @@ function Stage() {
     if (!user) return;
     loadDesk()
       .then((desk) => {
-        if (!desk.needsSetup && desk.profile.role === "admin") setAdmin(true);
+        if (!desk.needsSetup && desk.profile.role === "superadmin") setAdmin(true);
       })
       .catch(() => setAdmin(false));
   }, [user]);
@@ -155,8 +155,8 @@ function Stage() {
             {proposal.status === "pending" && !admin && !isPending ? (
               <p className="text-sm text-muted">
                 {user
-                  ? "You can read this staging build. Only an admin can merge it."
-                  : "Sign in as an admin to approve, or use the approve link from the text or email."}
+                  ? "You can read this staging build. Only Elvira, the super admin, can merge it."
+                  : "Sign in as Elvira to approve, or open the approve link from her text."}
               </p>
             ) : null}
             {!user && !isPending ? (

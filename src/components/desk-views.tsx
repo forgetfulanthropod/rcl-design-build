@@ -19,6 +19,8 @@ import {
   updateWorkOrder,
 } from "@/lib/server/fns";
 import { money, stamp } from "@/lib/money";
+import { formatPhone, roleLabel, samePhone, SUPER_ADMIN_PHONE_DISPLAY } from "@/lib/roles";
+import { groupTasks } from "@/lib/tasks";
 import { Button, Chip, Panel } from "@/components/ui";
 
 export type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
@@ -29,14 +31,15 @@ type Commit = (work: Promise<DeskResult>) => Promise<void>;
 export function DeskHome({ data, open }: { data: ReadyDesk; open: (view: "jobs" | "field" | "foreman" | "comms") => void }) {
   const active = data.projects.filter((project) => !project.archived);
   const openRfis = data.rfis.filter((rfi) => rfi.status !== "Closed" && rfi.status !== "Answered");
-  const hot = data.workOrders.filter((order) => order.status !== "Complete" && order.status !== "Invoiced");
+  const closed = new Set(["Complete", "Billed", "Invoiced"]);
+  const hot = data.workOrders.filter((order) => !closed.has(order.status));
   const pending = data.proposals.filter((proposal) => proposal.status === "pending");
   const chart = active.map((project) => ({ name: project.name, value: project.contractValue }));
 
   return (
     <div className="grid gap-4">
       <section className="rounded-md border border-line bg-surface p-5">
-        <p className="text-sm text-copper">{data.profile.role}</p>
+        <p className="text-sm text-copper">{roleLabel(data.profile.role)}</p>
         <h2 className="mt-1 text-3xl text-fg">
           {data.copy.deskGreeting.replace(/\.$/, "")}, {data.profile.name.split(" ")[0]}.
         </h2>
@@ -44,8 +47,8 @@ export function DeskHome({ data, open }: { data: ReadyDesk; open: (view: "jobs" 
       </section>
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Open jobs" value={String(active.length)} onClick={() => open("jobs")} />
-        <Stat label="Live calls" value={String(hot.length)} onClick={() => open("field")} />
-        <Stat label="Code waiting" value={String(pending.length)} onClick={() => open("foreman")} />
+        <Stat label="Open site work" value={String(hot.length)} onClick={() => open("field")} />
+        <Stat label="Waiting on Elvira" value={String(pending.length)} onClick={() => open("foreman")} />
       </div>
       {chart.length > 0 ? (
         <Panel title="Contract value">
@@ -80,13 +83,13 @@ export function DeskHome({ data, open }: { data: ReadyDesk; open: (view: "jobs" 
             ))}
           </ul>
         </Panel>
-        <Panel title="Dispatch">
-          {hot.length === 0 ? <p className="text-sm text-muted">No open work orders.</p> : null}
+        <Panel title="Site work">
+          {hot.length === 0 ? <p className="text-sm text-muted">Nothing open on site.</p> : null}
           <ul className="grid gap-2">
             {hot.slice(0, 4).map((order) => (
               <li key={order.id} className="flex items-center justify-between gap-2 text-sm">
                 <span className="min-w-0 truncate">{order.title}</span>
-                <Chip hot={order.priority === "Emergency"}>{order.status}</Chip>
+                <Chip hot={order.priority === "Rush" || order.priority === "Emergency"}>{order.status}</Chip>
               </li>
             ))}
           </ul>
@@ -113,7 +116,7 @@ export function JobsView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
   const [name, setName] = useState("");
   const [clientName, setClientName] = useState("");
   const [address, setAddress] = useState("");
-  const [phase, setPhase] = useState(data.workflows.projectPhases[0] ?? "Precon");
+  const [phase, setPhase] = useState(data.workflows.projectPhases[0] ?? "Schematic");
   const [value, setValue] = useState("0");
   const [summary, setSummary] = useState("");
 
@@ -227,7 +230,8 @@ function JobDetail({
             </button>
           ))}
         </div>
-        {!job.archived && (data.profile.role === "admin" || data.profile.role === "pm") ? (
+        {!job.archived &&
+        (data.profile.role === "admin" || data.profile.role === "superadmin" || data.profile.role === "pm") ? (
           <button
             type="button"
             className="mt-3 text-sm text-muted"
@@ -416,11 +420,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
   const [projectId, setProjectId] = useState("");
   const [notes, setNotes] = useState("");
   const grouped = useMemo(
-    () =>
-      data.workflows.workOrderStatuses.map((status) => ({
-        status,
-        items: data.workOrders.filter((item) => item.status === status),
-      })),
+    () => groupTasks(data.workOrders, data.workflows.workOrderStatuses),
     [data.workOrders, data.workflows.workOrderStatuses],
   );
 
@@ -441,7 +441,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
       >
         <input className="field" placeholder="Customer" value={customer} onChange={(e) => setCustomer(e.target.value)} required />
         <input className="field" placeholder="Site" value={site} onChange={(e) => setSite(e.target.value)} required />
-        <input className="field md:col-span-2" placeholder="Work order" value={title} onChange={(e) => setTitle(e.target.value)} required />
+        <input className="field md:col-span-2" placeholder="Site task" value={title} onChange={(e) => setTitle(e.target.value)} required />
         <select className="field" value={trade} onChange={(e) => setTrade(e.target.value)}>
           {data.workflows.trades.map((item) => (
             <option key={item}>{item}</option>
@@ -462,9 +462,9 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
               </option>
             ))}
         </select>
-        <textarea className="field md:col-span-2" placeholder="Notes for the tech" value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <textarea className="field md:col-span-2" placeholder="Notes for the crew" value={notes} onChange={(e) => setNotes(e.target.value)} />
         <Button type="submit" className="md:col-span-2">
-          Dispatch
+          Add to the board
         </Button>
       </form>
       <div className="flex gap-3 overflow-x-auto pb-2">
@@ -492,7 +492,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
                   <p className="text-sm">{item.title}</p>
                   <p className="mt-1 text-xs text-muted">{item.customer}</p>
                   <div className="mt-2">
-                    <Chip hot={item.priority === "Emergency"}>{item.priority}</Chip>
+                    <Chip hot={item.priority === "Rush" || item.priority === "Emergency"}>{item.priority}</Chip>
                   </div>
                 </button>
               ))}
@@ -503,7 +503,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
       {order ? (
         <OrderEditor key={order.id} order={order} data={data} commit={commit} />
       ) : (
-        <p className="text-sm text-muted">Dispatch a call to fill the board.</p>
+        <p className="text-sm text-muted">Add a task to fill the board.</p>
       )}
     </div>
   );
@@ -570,12 +570,12 @@ export function CommsView({ data }: { data: ReadyDesk }) {
   return (
     <div className="grid gap-3">
       <p className="max-w-xl text-sm leading-relaxed text-muted">
-        Email and texts land here. Staging approvals are private to each admin. Invites stay with the
-        person who sent them. Magic sign-in links are single-use.
+        Email and texts for the crew land here. Staging approvals go to Elvira at {SUPER_ADMIN_PHONE_DISPLAY}. Invites stay with the
+        person who sent them. Each sign-in link works once.
       </p>
       {data.comms.length === 0 ? (
         <p className="rounded-md border border-line bg-surface p-4 text-sm text-muted">
-          Nothing in the radio yet. Ask Foreman to change the product, or invite a crew member.
+          Nothing in the log yet. Ask Foreman to change the desk, or invite a crew member.
         </p>
       ) : null}
       {data.comms.map((message) => (
@@ -617,8 +617,8 @@ export function ForemanView({ data, commit }: { data: ReadyDesk; commit: Commit 
         <div className="flex-1 space-y-3 overflow-y-auto p-4">
           {data.thread.length === 0 ? (
             <p className="text-sm leading-relaxed text-muted">
-              Ask about River House, or tell Foreman to change the product. “Add phase Punch” stages
-              a code edit and texts the admin a staging link.
+              Ask about a Lexington job, or tell Foreman to change the desk. “Add phase Warranty” stages
+              the edit and texts Elvira before it goes live.
             </p>
           ) : null}
           {data.thread.map((item) => (
@@ -668,7 +668,7 @@ export function ForemanView({ data, commit }: { data: ReadyDesk; commit: Commit 
             <a href={proposal.stagingPath} className="mt-2 inline-flex text-sm text-copper">
               Open staging
             </a>
-            {data.profile.role === "admin" && proposal.status === "pending" ? (
+            {data.profile.role === "superadmin" && proposal.status === "pending" ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <Button
                   className="px-2"
@@ -687,8 +687,10 @@ export function ForemanView({ data, commit }: { data: ReadyDesk; commit: Commit 
             ) : null}
           </article>
         ))}
-        {pending.length > 0 && data.profile.role !== "admin" ? (
-          <p className="text-xs text-muted">Admins approve from the link in their text or email.</p>
+        {pending.length > 0 && data.profile.role !== "superadmin" ? (
+          <p className="text-xs text-muted">
+            Elvira approves from the text to {SUPER_ADMIN_PHONE_DISPLAY}.
+          </p>
         ) : null}
       </aside>
     </div>
@@ -711,21 +713,27 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
             <li key={person.userId} className="flex items-center justify-between gap-2 text-sm">
               <div>
                 <p>{person.name}</p>
-                <p className="text-muted">{person.phone || person.email || "No direct line"}</p>
+                <p className="text-muted">
+                  {person.phone ? formatPhone(person.phone) : person.email || "No direct line"}
+                </p>
               </div>
-              <Chip>{person.role}</Chip>
+              <Chip hot={person.role === "superadmin"}>{roleLabel(person.role)}</Chip>
             </li>
           ))}
         </ul>
       </Panel>
       <Panel title="Invite">
-        {data.profile.role !== "admin" ? (
+        {data.profile.role !== "admin" && data.profile.role !== "superadmin" ? (
           <p className="text-sm text-muted">Only an admin can send email or text invites.</p>
         ) : (
           <form
             className="grid gap-2"
             onSubmit={(event) => {
               event.preventDefault();
+              if (channel === "sms" && samePhone(destination)) {
+                setError(`That number belongs to Elvira, the super admin (${SUPER_ADMIN_PHONE_DISPLAY}).`);
+                return;
+              }
               void inviteCrew({ data: { channel, destination, name, role } })
                 .then((result) => {
                   setError("");
@@ -762,10 +770,18 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
               required
             />
             <select className="field" value={role} onChange={(e) => setRole(e.target.value)}>
-              {["field", "superintendent", "pm", "office", "admin"].map((item) => (
-                <option key={item}>{item}</option>
+              {(data.profile.role === "superadmin"
+                ? ["field", "superintendent", "pm", "office", "admin"]
+                : ["field", "superintendent", "pm", "office"]
+              ).map((item) => (
+                <option key={item} value={item}>
+                  {roleLabel(item)}
+                </option>
               ))}
             </select>
+            <p className="text-xs text-muted">
+              Elvira is the super admin at {SUPER_ADMIN_PHONE_DISPLAY}. That number cannot be invited.
+            </p>
             <Button type="submit">Send invite</Button>
             {error ? <p className="text-sm text-danger">{error}</p> : null}
             {sent ? (

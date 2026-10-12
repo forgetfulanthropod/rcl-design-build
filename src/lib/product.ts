@@ -7,10 +7,10 @@ export const COPY_SOURCE = `// src/product/copy.ts
 // Live product copy. Foreman may replace this file; an admin approves it on staging.
 export const copy = {
   "companyMark": "RCL",
-  "productName": "RCL Design-Build",
-  "tagline": "Design, build, and service from one desk.",
-  "deskGreeting": "The job is the source of truth.",
-  "fieldLabel": "Field service",
+  "productName": "RCL Design Build",
+  "tagline": "Building smart, from schematic design to finish.",
+  "deskGreeting": "Keep the job on budget and on the board.",
+  "fieldLabel": "Site work",
   "jobsLabel": "Jobs"
 };
 `;
@@ -18,12 +18,12 @@ export const copy = {
 export const WORKFLOW_SOURCE = `// src/product/workflows.ts
 // Statuses, phases, and trades the desk actually renders.
 export const workflows = {
-  "projectPhases": ["Precon", "Design", "Permit", "Build", "Closeout"],
-  "workOrderStatuses": ["New", "Scheduled", "En route", "On site", "Complete", "Invoiced"],
-  "priorities": ["Emergency", "High", "Normal", "Low"],
+  "projectPhases": ["Schematic", "Design", "Permit", "Build", "Finish"],
+  "workOrderStatuses": ["New", "Scheduled", "On site", "Punch", "Complete", "Billed"],
+  "priorities": ["Rush", "High", "Normal", "Low"],
   "rfiStatuses": ["Open", "Ball in court", "Answered", "Closed"],
   "coStatuses": ["Draft", "Submitted", "Approved", "Rejected"],
-  "trades": ["Electrical", "Plumbing", "HVAC", "Carpentry", "Concrete", "Roofing", "Finish"]
+  "trades": ["Design", "New build", "Remodel", "Restoration", "Addition", "Fit-up", "Repairs"]
 };
 `;
 

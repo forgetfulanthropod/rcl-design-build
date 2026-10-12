@@ -18,7 +18,7 @@ function Intro({ showEntry }: { showEntry: boolean }) {
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Mark />
-          <span className="text-sm font-medium tracking-wide text-fg">RCL Design-Build</span>
+          <span className="text-sm font-medium tracking-wide text-fg">RCL Design Build</span>
         </div>
         {showEntry ? (
           <Link to="/login" className="text-sm text-copper">
@@ -30,14 +30,14 @@ function Intro({ showEntry }: { showEntry: boolean }) {
       </header>
       <div className="grid flex-1 content-center gap-10 py-12 md:grid-cols-[1.3fr_0.7fr] md:items-end">
         <div>
-          <p className="text-sm font-medium uppercase tracking-widest text-copper">Design-build + field service</p>
+          <p className="text-sm font-medium uppercase tracking-widest text-copper">Lexington design-build</p>
           <h1 className="mt-3 max-w-xl text-5xl leading-none text-fg md:text-6xl">
-            One desk for the job and the truck.
+            Building smart.
           </h1>
           <p className="mt-5 max-w-lg text-lg leading-relaxed text-muted">
-            RCL replaces the split between a project system and a dispatch board. Drawings, RFIs,
-            change orders, and service calls sit together. Every account can talk to Foreman. Foreman
-            does not edit the product until an admin opens the staging link from a text or email.
+            The operations desk for RCL Design Build. Schematic design through finish, on one board:
+            architectural design, remodels, additions, restoration, new construction, and commercial
+            fit-up. Foreman can draft a change to the desk, and Elvira approves it before it goes live.
           </p>
           {showEntry ? (
             <Link
@@ -50,9 +50,9 @@ function Intro({ showEntry }: { showEntry: boolean }) {
         </div>
         <ul className="grid gap-3">
           {[
-            ["Jobs", "Phases, sheets, RFIs, change orders, daily logs."],
-            ["Field", "Work orders by trade, priority, and who is rolling."],
-            ["Foreman", "A bot that proposes code, then waits for an admin."],
+            ["Jobs", "Schematic through finish. Sheets, RFIs, change orders, daily logs."],
+            ["Site", "Remodels, repairs, fit-ups, and punch, held to priority."],
+            ["Foreman", "Drafts a desk change, then waits for Elvira."],
           ].map(([title, body]) => (
             <li key={title} className="rounded-md border border-line bg-surface p-4">
               <p className="font-display text-xl text-fg">{title}</p>

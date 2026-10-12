@@ -3,9 +3,11 @@ import { getSql, type Sql } from "@/lib/db";
 import { validateSource } from "@/lib/product";
 import { absoluteUrl, isMailerConfigured, sendEmail } from "@/lib/server/mailer.server";
 import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
+import { ROLES } from "@/lib/roles";
+import { canReplayConsumedLink, safeRedirect } from "@/lib/sign-in-complete";
 
 const SMS_DOMAIN = "crew.rcl.build";
-const ROLES = new Set(["admin", "pm", "superintendent", "field", "office"]);
+const ROLE_SET = new Set<string>(ROLES);
 
 export function normalizeEmail(raw: string): string | null {
   const email = raw.trim().toLowerCase();
@@ -221,23 +223,34 @@ export async function applyDecision(
   return { ok: true, stagingToken, already: false };
 }
 
+type ConsumedLink = {
+  email: string;
+  display_name: string | null;
+  company_id: string | null;
+  role: string | null;
+  action: string | null;
+  proposal_id: string | null;
+  redirect_path: string | null;
+  channel: string;
+  destination: string;
+};
+
+function asDate(value: unknown): Date | null {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === "string" || typeof value === "number") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+}
+
 export async function consumeToken(raw: string): Promise<
   | { ok: true; sessionToken: string; redirect: string }
   | { ok: false; error: string }
 > {
   if (!/^[a-f0-9]{48}$/.test(raw)) return { ok: false, error: "This link is not valid." };
   const sql = await getSql();
-  const rows = await sql<{
-    email: string;
-    display_name: string | null;
-    company_id: string | null;
-    role: string | null;
-    action: string | null;
-    proposal_id: string | null;
-    redirect_path: string | null;
-    channel: string;
-    destination: string;
-  }>`
+  const claimed = await sql<ConsumedLink>`
     update magic_links
     set consumed_at = now()
     where token_hash = ${sha(raw)}
@@ -245,8 +258,22 @@ export async function consumeToken(raw: string): Promise<
       and expires_at > now()
     returning email, display_name, company_id, role, action, proposal_id, redirect_path, channel, destination
   `;
-  const link = rows[0];
-  if (!link) return { ok: false, error: "This link is expired or already used." };
+  let link = claimed[0];
+  if (!link) {
+    const prior = await sql<ConsumedLink & { consumed_at: unknown; expires_at: unknown }>`
+      select email, display_name, company_id, role, action, proposal_id, redirect_path, channel, destination,
+             consumed_at, expires_at
+      from magic_links
+      where token_hash = ${sha(raw)}
+    `;
+    const row = prior[0];
+    const consumedAt = row ? asDate(row.consumed_at) : null;
+    const expiresAt = row ? asDate(row.expires_at) : null;
+    if (!row || !expiresAt || !canReplayConsumedLink(consumedAt, expiresAt, new Date())) {
+      return { ok: false, error: "This link is expired or already used." };
+    }
+    link = row;
+  }
 
   const email = text(link.email).toLowerCase();
   const name = text(link.display_name).trim() || email.split("@")[0] || "Crew";
@@ -277,7 +304,7 @@ export async function consumeToken(raw: string): Promise<
 
   const companyId = text(link.company_id);
   const role = text(link.role);
-  if (companyId && ROLES.has(role)) {
+  if (companyId && ROLE_SET.has(role)) {
     const existing = await sql<{ user_id: string }>`
       select user_id from profiles where user_id = ${userId}
     `;
@@ -298,15 +325,14 @@ export async function consumeToken(raw: string): Promise<
     }
   }
 
-  let redirect = text(link.redirect_path) || "/";
-  if (!redirect.startsWith("/") || redirect.startsWith("//")) redirect = "/";
+  let redirect = safeRedirect(text(link.redirect_path) || "/");
   const action = text(link.action);
   const proposalId = text(link.proposal_id);
   if ((action === "approve" || action === "reject") && proposalId) {
     const prof = await sql<{ role: string; company_id: string }>`
       select role, company_id from profiles where user_id = ${userId}
     `;
-    if (prof[0]?.role === "admin") {
+    if (prof[0]?.role === "superadmin") {
       const decision = await applyDecision(sql, {
         proposalId,
         companyId: text(prof[0].company_id),

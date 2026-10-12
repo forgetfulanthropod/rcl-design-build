@@ -3,7 +3,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
 
-const APP_NAME = "RCL Design-Build";
+const APP_NAME = "RCL Design Build";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -13,7 +13,7 @@ export const Route = createRootRoute({
       { title: APP_NAME },
       {
         name: "description",
-        content: "Jobs, field service, and a foreman that stages its own code for admin approval.",
+        content: "RCL Design Build operations in Lexington. Jobs from schematic design to finish, site work, and crew sign-in.",
       },
       { name: "theme-color", content: "#141210" },
     ],

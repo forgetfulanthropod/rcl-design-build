@@ -75,21 +75,21 @@ function Login() {
       <section className="hidden flex-col justify-between border-r border-line bg-surface p-10 md:flex">
         <div className="flex items-center gap-3">
           <Mark />
-          <span className="font-medium">RCL Design-Build</span>
+          <span className="font-medium">RCL Design Build</span>
         </div>
         <div>
-          <h1 className="text-4xl text-fg">A link, not a password locker.</h1>
+          <h1 className="text-4xl text-fg">Sign in to the desk.</h1>
           <p className="mt-4 max-w-sm leading-relaxed text-muted">
-            Superintendents, techs, and the office each sign in on their own email or phone. The
-            magic link is single-use. Google and X stay available when a desk already lives there.
+            Design, the superintendent, and the office each sign in on their own email or phone. One
+            link, then the job. From schematic design to finish.
           </p>
         </div>
-        <p className="text-sm text-muted">Foreman will not ship a code change without an admin.</p>
+        <p className="text-sm text-muted">Foreman will not ship a code change until Elvira approves it.</p>
       </section>
       <section className="flex flex-col justify-center px-5 py-10">
         <Link to="/" className="mb-8 flex items-center gap-3 md:hidden">
           <Mark />
-          <span className="font-medium">RCL Design-Build</span>
+          <span className="font-medium">RCL Design Build</span>
         </Link>
         <h1 className="text-3xl text-fg md:hidden">Sign in</h1>
         <p className="mt-2 text-sm text-muted md:mt-0">Email or text. One account per person.</p>

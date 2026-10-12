@@ -24,9 +24,16 @@ import {
   phoneToEmail,
 } from "@/lib/server/magic.server";
 import { absoluteUrl, deliverOutbound } from "@/lib/server/mailer.server";
-
-const ROLES = ["admin", "pm", "superintendent", "field", "office"] as const;
-type Role = (typeof ROLES)[number];
+import { taskUpdateError } from "@/lib/tasks";
+import {
+  ROLES,
+  SUPER_ADMIN_NAME,
+  SUPER_ADMIN_PHONE,
+  SUPER_ADMIN_PHONE_DISPLAY,
+  roleRank,
+  samePhone,
+  type Role,
+} from "@/lib/roles";
 
 function text(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -83,7 +90,106 @@ async function requireProfile(userId: string): Promise<{ sql: Sql; profile: Prof
   };
 }
 
+async function rewriteLegacyOperations(sql: Sql, companyId: string) {
+  const files = await sql<{ path: string; content: string }>`
+    select path, content from source_files where company_id = ${companyId}
+  `;
+  for (const file of files) {
+    const content = text(file.content);
+    if (
+      file.path === COPY_PATH &&
+      (content.includes("from one desk") ||
+        content.includes("Field service") ||
+        content.includes("The job is the source of truth") ||
+        content.includes("Built once, serviced forever"))
+    ) {
+      await sql`
+        update source_files set content = ${COPY_SOURCE}, updated_at = now()
+        where company_id = ${companyId} and path = ${COPY_PATH}
+      `;
+    }
+    if (
+      file.path === WORKFLOW_PATH &&
+      (content.includes("Precon") || content.includes("En route") || content.includes("HVAC"))
+    ) {
+      await sql`
+        update source_files set content = ${WORKFLOW_SOURCE}, updated_at = now()
+        where company_id = ${companyId} and path = ${WORKFLOW_PATH}
+      `;
+      await sql`update projects set phase = 'Schematic' where company_id = ${companyId} and phase = 'Precon'`;
+      await sql`update projects set phase = 'Finish' where company_id = ${companyId} and phase = 'Closeout'`;
+      await sql`update work_orders set status = 'On site' where company_id = ${companyId} and status = 'En route'`;
+      await sql`update work_orders set status = 'Billed' where company_id = ${companyId} and status = 'Invoiced'`;
+      await sql`update work_orders set priority = 'Rush' where company_id = ${companyId} and priority = 'Emergency'`;
+      await sql`update work_orders set trade = 'Repairs' where company_id = ${companyId} and trade in ('Electrical', 'HVAC', 'Plumbing')`;
+      await sql`update work_orders set trade = 'Remodel' where company_id = ${companyId} and trade in ('Carpentry', 'Finish')`;
+      await sql`update work_orders set trade = 'New build' where company_id = ${companyId} and trade in ('Concrete', 'Roofing')`;
+    }
+  }
+  await sql`
+    update projects set
+      name = 'Lexington kitchen',
+      client_name = 'Residential remodel',
+      address = 'Lexington, KY',
+      phase = 'Build',
+      contract_value = 186000,
+      summary = 'Kitchen and bath remodel. 3D drawings, schematic through finish, held to the budget.'
+    where company_id = ${companyId} and name = 'River House'
+  `;
+  await sql`update milestones set name = 'Schematic signed' where company_id = ${companyId} and name = 'Permit set approved'`;
+  await sql`update milestones set name = 'Permit in hand' where company_id = ${companyId} and name = 'Dried in'`;
+  await sql`update milestones set name = 'Finish walkthrough' where company_id = ${companyId} and name = 'Substantial completion'`;
+  await sql`
+    update sheets set number = 'A1.0', title = 'Schematic floor plan', discipline = 'Design'
+    where company_id = ${companyId} and title = 'Main floor plan'
+  `;
+  await sql`
+    update sheets set number = 'A2.1', title = 'Kitchen and bath', revision = 'C', discipline = 'Design'
+    where company_id = ${companyId} and title = 'Power and lighting'
+  `;
+  await sql`
+    update rfis set
+      title = 'Cabinet depth at the window',
+      question = 'The 3D set shows 24 inches. The existing stool is proud of the wall. Confirm we hold the drawing or pull the run.'
+    where company_id = ${companyId} and title = 'Footing depth at the river edge'
+  `;
+  await sql`
+    update change_orders set title = 'Stone backsplash in place of tile', amount = 4200
+    where company_id = ${companyId} and title = 'Cedar soffit in place of vented vinyl'
+  `;
+  await sql`
+    update daily_logs set
+      crew = 4,
+      weather = 'Clear',
+      notes = 'Kitchen demo is done. Bath addition frames tomorrow. No injuries.'
+    where company_id = ${companyId} and notes like 'Framing crew on the east wall%'
+  `;
+  await sql`
+    update work_orders set
+      customer = 'Residential remodel',
+      site = 'Lexington, KY',
+      title = 'Hold the cabinet run to the 3D set',
+      trade = 'Remodel',
+      priority = 'Normal',
+      status = 'On site',
+      notes = 'Window stool is proud of the wall. Confirm before the boxes land.'
+    where company_id = ${companyId} and title = 'Replace heat-damaged range circuit'
+  `;
+  await sql`
+    update work_orders set
+      customer = 'Commercial fit-up',
+      site = 'Lexington, KY',
+      title = 'Restaurant fit-up punch',
+      trade = 'Fit-up',
+      priority = 'High',
+      status = 'Scheduled',
+      notes = 'Bar front and restroom. Walk the scope before we close the week.'
+    where company_id = ${companyId} and title = 'Fall filter service'
+  `;
+}
+
 async function loadConfig(sql: Sql, companyId: string) {
+  await rewriteLegacyOperations(sql, companyId);
   const files = await sql<{ path: string; content: string }>`
     select path, content from source_files where company_id = ${companyId}
   `;
@@ -120,18 +226,18 @@ async function seedSample(sql: Sql, companyId: string, userId: string) {
     ) values (
       ${projectId},
       ${companyId},
-      ${"River House"},
-      ${"Holloway Family"},
-      ${"140 River Road"},
+      ${"Lexington kitchen"},
+      ${"Residential remodel"},
+      ${"Lexington, KY"},
       ${"Build"},
-      ${486000},
-      ${"Design-build residence. Exposed structure, tight site, owner-occupied punch still ahead."}
+      ${186000},
+      ${"Kitchen and bath remodel. 3D drawings, schematic through finish, held to the budget."}
     )
   `;
   const milestones = [
-    ["Permit set approved", "2026-04-02", true],
-    ["Dried in", "2026-07-18", true],
-    ["Substantial completion", "2026-11-06", false],
+    ["Schematic signed", "2026-04-02", true],
+    ["Permit in hand", "2026-07-18", true],
+    ["Finish walkthrough", "2026-11-06", false],
   ] as const;
   for (const [name, due, done] of milestones) {
     await sql`
@@ -142,15 +248,15 @@ async function seedSample(sql: Sql, companyId: string, userId: string) {
   await sql`
     insert into sheets (id, company_id, project_id, number, title, revision, discipline)
     values
-      (${randomUUID()}, ${companyId}, ${projectId}, ${"A2.1"}, ${"Main floor plan"}, ${"C"}, ${"Architectural"}),
-      (${randomUUID()}, ${companyId}, ${projectId}, ${"E1.0"}, ${"Power and lighting"}, ${"B"}, ${"Electrical"})
+      (${randomUUID()}, ${companyId}, ${projectId}, ${"A1.0"}, ${"Schematic floor plan"}, ${"C"}, ${"Design"}),
+      (${randomUUID()}, ${companyId}, ${projectId}, ${"A2.1"}, ${"Kitchen and bath"}, ${"C"}, ${"Design"})
   `;
   await sql`
     insert into rfis (id, company_id, project_id, number, title, question, status, created_by)
     values (
       ${randomUUID()}, ${companyId}, ${projectId}, ${1},
-      ${"Footing depth at the river edge"},
-      ${"Soils report calls for 42 inches. The bank is higher than the survey. Confirm the inspector will accept 36 inches with the extra stone."},
+      ${"Cabinet depth at the window"},
+      ${"The 3D set shows 24 inches. The existing stool is proud of the wall. Confirm we hold the drawing or pull the run."},
       ${"Open"}, ${userId}
     )
   `;
@@ -159,8 +265,8 @@ async function seedSample(sql: Sql, companyId: string, userId: string) {
       id, company_id, project_id, number, title, amount, status, created_by
     ) values (
       ${randomUUID()}, ${companyId}, ${projectId}, ${1},
-      ${"Cedar soffit in place of vented vinyl"},
-      ${8400}, ${"Submitted"}, ${userId}
+      ${"Stone backsplash in place of tile"},
+      ${4200}, ${"Submitted"}, ${userId}
     )
   `;
   const today = new Date().toISOString().slice(0, 10);
@@ -168,9 +274,9 @@ async function seedSample(sql: Sql, companyId: string, userId: string) {
     insert into daily_logs (
       id, company_id, project_id, log_date, crew, weather, notes, created_by
     ) values (
-      ${randomUUID()}, ${companyId}, ${projectId}, ${today}, ${6},
-      ${"Clear, light wind"},
-      ${"Framing crew on the east wall. Electrician rough-in started in the kitchen. No injuries."},
+      ${randomUUID()}, ${companyId}, ${projectId}, ${today}, ${4},
+      ${"Clear"},
+      ${"Kitchen demo is done. Bath addition frames tomorrow. No injuries."},
       ${userId}
     )
   `;
@@ -179,10 +285,10 @@ async function seedSample(sql: Sql, companyId: string, userId: string) {
       id, company_id, project_id, customer, site, title, trade, priority, status, notes, created_by
     ) values (
       ${randomUUID()}, ${companyId}, ${projectId},
-      ${"Holloway Family"}, ${"140 River Road"},
-      ${"Replace heat-damaged range circuit"},
-      ${"Electrical"}, ${"Emergency"}, ${"En route"},
-      ${"Owner smelled heat at the range last night. Kill the breaker before opening the box."},
+      ${"Residential remodel"}, ${"Lexington, KY"},
+      ${"Hold the cabinet run to the 3D set"},
+      ${"Remodel"}, ${"Normal"}, ${"On site"},
+      ${"Window stool is proud of the wall. Confirm before the boxes land."},
       ${userId}
     )
   `;
@@ -191,12 +297,50 @@ async function seedSample(sql: Sql, companyId: string, userId: string) {
       id, company_id, project_id, customer, site, title, trade, priority, status, notes, created_by
     ) values (
       ${randomUUID()}, ${companyId}, ${null},
-      ${"Lane Annex"}, ${"88 Mill Street"},
-      ${"Fall filter service"},
-      ${"HVAC"}, ${"Normal"}, ${"Scheduled"},
-      ${"Two systems. Bring 20x25x1 and a spare capacitor."},
+      ${"Commercial fit-up"}, ${"Lexington, KY"},
+      ${"Restaurant fit-up punch"},
+      ${"Fit-up"}, ${"High"}, ${"Scheduled"},
+      ${"Bar front and restroom. Walk the scope before we close the week."},
       ${userId}
     )
+  `;
+}
+
+async function ensureElvira(sql: Sql, companyId: string) {
+  const phone = SUPER_ADMIN_PHONE;
+  const named = await sql<{ user_id: string }>`
+    select user_id from profiles
+    where company_id = ${companyId} and (phone = ${phone} or role = 'superadmin')
+    order by case when phone = ${phone} then 0 else 1 end
+    limit 1
+  `;
+  if (named[0]) {
+    await sql`
+      update profiles
+      set role = 'superadmin', phone = ${phone}, name = ${SUPER_ADMIN_NAME}
+      where user_id = ${text(named[0].user_id)}
+    `;
+    return;
+  }
+  const email = phoneToEmail(phone);
+  const found = await sql<{ id: string }>`
+    select "id" from "user" where lower("email") = ${email}
+  `;
+  let userId = text(found[0]?.id);
+  if (!userId) {
+    userId = randomUUID();
+    await sql`
+      insert into "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt")
+      values (${userId}, ${SUPER_ADMIN_NAME}, ${email}, true, now(), now())
+    `;
+  }
+  const taken = await sql<{ company_id: string }>`
+    select company_id from profiles where user_id = ${userId}
+  `;
+  if (taken[0]) return;
+  await sql`
+    insert into profiles (user_id, company_id, name, email, phone, role)
+    values (${userId}, ${companyId}, ${SUPER_ADMIN_NAME}, ${null}, ${phone}, ${"superadmin"})
   `;
 }
 
@@ -218,10 +362,12 @@ export async function loadDeskData(userId: string) {
     from profiles where user_id = ${userId}
   `;
   if (!rows[0]) {
+    const elviraAccount = accountEmail === phoneToEmail(SUPER_ADMIN_PHONE);
     return {
       needsSetup: true as const,
       email: isSyntheticEmail(accountEmail) ? "" : accountEmail,
-      suggestedName: text(users[0]?.name),
+      suggestedName: elviraAccount ? SUPER_ADMIN_NAME : text(users[0]?.name),
+      superAdmin: elviraAccount,
     };
   }
   const profile: Profile = {
@@ -233,6 +379,15 @@ export async function loadDeskData(userId: string) {
     role: (ROLES.includes(rows[0].role as Role) ? rows[0].role : "field") as Role,
   };
   const companyId = profile.companyId;
+  await ensureElvira(sql, companyId);
+  const again = await sql<{ name: string; phone: string | null; role: string }>`
+    select name, phone, role from profiles where user_id = ${userId}
+  `;
+  if (again[0] && ROLES.includes(again[0].role as Role)) {
+    profile.name = text(again[0].name);
+    profile.phone = text(again[0].phone);
+    profile.role = again[0].role as Role;
+  }
   const companies = await sql<{ name: string }>`select name from companies where id = ${companyId}`;
   const { copy, workflows } = await loadConfig(sql, companyId);
 
@@ -463,13 +618,15 @@ export async function loadDeskData(userId: string) {
       notes: text(w.notes),
       createdAt: text(w.created_at),
     })),
-    crew: crew.map((c) => ({
-      userId: text(c.user_id),
-      name: text(c.name),
-      email: text(c.email),
-      phone: text(c.phone),
-      role: text(c.role),
-    })),
+    crew: crew
+      .map((c) => ({
+        userId: text(c.user_id),
+        name: text(c.name),
+        email: text(c.email),
+        phone: text(c.phone),
+        role: text(c.role),
+      }))
+      .sort((a, b) => roleRank(a.role) - roleRank(b.role) || a.name.localeCompare(b.name)),
     comms: comms.map((m) => ({
       id: text(m.id),
       channel: text(m.channel),
@@ -517,6 +674,12 @@ export async function completeSetup(
   if (input.phone.trim() && !phone) throw new Error("Enter a mobile number with area code, or leave it blank.");
   const users = await sql<{ email: string }>`select "email" from "user" where "id" = ${userId}`;
   const accountEmail = text(users[0]?.email);
+  const elviraAccount = accountEmail === phoneToEmail(SUPER_ADMIN_PHONE);
+  if (phone && samePhone(phone) && !elviraAccount) {
+    throw new Error(
+      `That number belongs to Elvira, the super admin. Use your own mobile or leave it blank.`,
+    );
+  }
   const companyId = randomUUID();
   await sql`insert into companies (id, name) values (${companyId}, ${companyName})`;
   await sql`
@@ -524,10 +687,10 @@ export async function completeSetup(
     values (
       ${userId},
       ${companyId},
-      ${name},
+      ${elviraAccount ? SUPER_ADMIN_NAME : name},
       ${isSyntheticEmail(accountEmail) ? null : accountEmail},
-      ${phone},
-      ${"admin"}
+      ${elviraAccount ? SUPER_ADMIN_PHONE : phone},
+      ${elviraAccount ? "superadmin" : "admin"}
     )
   `;
   await sql`
@@ -535,7 +698,7 @@ export async function completeSetup(
       (${companyId}, ${COPY_PATH}, ${COPY_SOURCE}),
       (${companyId}, ${WORKFLOW_PATH}, ${WORKFLOW_SOURCE})
   `;
-  await sql`update "user" set "name" = ${name}, "updatedAt" = now() where "id" = ${userId}`;
+  await sql`update "user" set "name" = ${elviraAccount ? SUPER_ADMIN_NAME : name}, "updatedAt" = now() where "id" = ${userId}`;
   await seedSample(sql, companyId, userId);
   return loadDeskData(userId);
 }
@@ -591,7 +754,9 @@ export async function setProjectPhase(userId: string, input: { id: string; phase
 
 export async function archiveProject(userId: string, id: string) {
   const { sql, profile } = await requireProfile(userId);
-  if (profile.role !== "admin" && profile.role !== "pm") throw new Error("Only an admin or PM can archive a job.");
+  if (profile.role !== "admin" && profile.role !== "superadmin" && profile.role !== "pm") {
+    throw new Error("Only an admin, the super admin, or a PM can archive a job.");
+  }
   await sql`
     update projects set archived = true
     where id = ${id} and company_id = ${profile.companyId}
@@ -739,8 +904,13 @@ export async function updateWorkOrder(
 ) {
   const { sql, profile } = await requireProfile(userId);
   const { workflows } = await loadConfig(sql, profile.companyId);
-  if (!workflows.workOrderStatuses.includes(input.status)) throw new Error("Unknown status.");
-  if (!workflows.priorities.includes(input.priority)) throw new Error("Unknown priority.");
+  const problem = taskUpdateError({
+    status: input.status,
+    priority: input.priority,
+    statuses: workflows.workOrderStatuses,
+    priorities: workflows.priorities,
+  });
+  if (problem) throw new Error(problem);
   let assignee: string | null = input.assignedUserId || null;
   if (assignee) {
     const member = await sql<{ user_id: string }>`
@@ -762,8 +932,15 @@ export async function inviteCrew(
   input: { channel: "email" | "sms"; destination: string; name: string; role: string },
 ) {
   const { sql, profile } = await requireProfile(userId);
-  if (profile.role !== "admin") throw new Error("Only an admin can invite the crew.");
-  if (!ROLES.includes(input.role as Role)) throw new Error("Pick a role.");
+  if (profile.role !== "admin" && profile.role !== "superadmin") {
+    throw new Error("Only an admin can invite the crew.");
+  }
+  if (!ROLES.includes(input.role as Role) || input.role === "superadmin") {
+    throw new Error("Pick a role.");
+  }
+  if (input.role === "admin" && profile.role !== "superadmin") {
+    throw new Error("Only Elvira can invite another admin.");
+  }
   const name = input.name.trim();
   if (name.length < 2) throw new Error("Enter their name.");
   let email: string;
@@ -776,6 +953,9 @@ export async function inviteCrew(
   } else {
     const phone = normalizePhone(input.destination);
     if (!phone) throw new Error("Enter a mobile number with area code.");
+    if (samePhone(phone)) {
+      throw new Error(`That number belongs to Elvira, the super admin (${SUPER_ADMIN_PHONE_DISPLAY}).`);
+    }
     email = phoneToEmail(phone);
     destination = phone;
   }
@@ -792,7 +972,7 @@ export async function inviteCrew(
     minutes: 60 * 24 * 7,
   });
   const subject = `You're on the ${profile.name ? "RCL" : "RCL"} crew`;
-  const body = `${name}, ${profile.name} invited you to RCL Design-Build as ${input.role}. Open this single-use link to sign in: ${absoluteUrl(previewPath)}`;
+  const body = `${name}, ${profile.name} invited you to RCL Design Build as ${input.role}. Open this single-use link to sign in: ${absoluteUrl(previewPath)}`;
   const messageId = randomUUID();
   const inviteSubject = `Crew invite for ${name}`;
   await sql`
@@ -830,7 +1010,7 @@ function heuristicProposal(
     const copy = parseCopy(copySource);
     copy.tagline = next;
     return {
-      reply: `I staged a copy change so the desk tagline reads “${next}”. An admin has to approve it from the staging link before it goes live. I sent that link by text and email.`,
+      reply: `I staged a copy change so the desk tagline reads “${next}”. It stays off the live desk until Elvira approves it. I texted her at ${SUPER_ADMIN_PHONE_DISPLAY}.`,
       proposal: {
         title: "Update desk tagline",
         summary: `Set tagline to “${next}”.`,
@@ -845,7 +1025,7 @@ function heuristicProposal(
     const workflows = parseWorkflows(workflowSource);
     if (!workflows.projectPhases.includes(name)) workflows.projectPhases.push(name);
     return {
-      reply: `I staged workflows.ts to add the “${name}” phase. It stays off the live desk until an admin opens the staging link and approves it. I texted and emailed them.`,
+      reply: `I staged workflows.ts to add the “${name}” phase. It stays off the live desk until Elvira opens the text and approves it.`,
       proposal: {
         title: `Add phase ${name}`,
         summary: `Append “${name}” to project phases.`,
@@ -860,10 +1040,10 @@ function heuristicProposal(
     const workflows = parseWorkflows(workflowSource);
     if (!workflows.workOrderStatuses.includes(name)) workflows.workOrderStatuses.push(name);
     return {
-      reply: `I staged a new field status, “${name}”. Admins got a staging link by text and email. Nothing changes on the board until one of them approves it.`,
+      reply: `I staged a new site status, “${name}”. Elvira got a staging text at ${SUPER_ADMIN_PHONE_DISPLAY}. Nothing changes on the board until she approves it.`,
       proposal: {
-        title: `Add field status ${name}`,
-        summary: `Append “${name}” to work order statuses.`,
+        title: `Add site status ${name}`,
+        summary: `Append “${name}” to site work statuses.`,
         file: WORKFLOW_PATH,
         content: renderWorkflows(workflows),
       },
@@ -875,7 +1055,7 @@ function heuristicProposal(
     const workflows = parseWorkflows(workflowSource);
     if (!workflows.trades.includes(name)) workflows.trades.push(name);
     return {
-      reply: `I staged “${name}” as a trade. Check the staging build, then an admin approves it. I already sent the link.`,
+      reply: `I staged “${name}” as a trade. Elvira has the staging text. Nothing goes live until she approves it.`,
       proposal: {
         title: `Add trade ${name}`,
         summary: `Append “${name}” to trades.`,
@@ -886,7 +1066,7 @@ function heuristicProposal(
   }
   return {
     reply:
-      "Ask me about a job, or tell me to change the product. Try “add phase Punch” or “set the tagline to Built once, serviced forever.” I will stage the code and text the admin a link.",
+      "Ask me about a job, or tell me to change the desk. Try “add phase Warranty” or “set the tagline to Building smart.” I will stage the edit and text Elvira.",
     proposal: null,
   };
 }
@@ -954,31 +1134,32 @@ function parseModelPayload(raw: string): {
   }
 }
 
-async function notifyAdmins(
+async function notifySuperAdmin(
   sql: Sql,
   companyId: string,
   proposalId: string,
   stagingToken: string,
   title: string,
   summary: string,
+  authorUserId: string,
 ) {
+  await ensureElvira(sql, companyId);
   const admins = await sql<{ user_id: string; name: string; phone: string | null }>`
     select user_id, name, phone from profiles
-    where company_id = ${companyId} and role = 'admin'
+    where company_id = ${companyId} and role = 'superadmin'
   `;
   const stagingPath = `/stage/${stagingToken}`;
   for (const admin of admins) {
     const account = await sql<{ email: string }>`
       select "email" from "user" where "id" = ${text(admin.user_id)}
     `;
-    const loginEmail = text(account[0]?.email);
-    if (!loginEmail) continue;
-    const phone = text(admin.phone);
+    const loginEmail = text(account[0]?.email) || phoneToEmail(SUPER_ADMIN_PHONE);
+    const phone = SUPER_ADMIN_PHONE;
     const approve = await insertMagicLink({
-      channel: phone ? "sms" : "email",
-      destination: phone || loginEmail,
+      channel: "sms",
+      destination: phone,
       email: loginEmail,
-      displayName: text(admin.name) || null,
+      displayName: SUPER_ADMIN_NAME,
       companyId,
       role: null,
       action: "approve",
@@ -987,10 +1168,10 @@ async function notifyAdmins(
       minutes: 60 * 24 * 3,
     });
     const reject = await insertMagicLink({
-      channel: phone ? "sms" : "email",
-      destination: phone || loginEmail,
+      channel: "sms",
+      destination: phone,
       email: loginEmail,
-      displayName: text(admin.name) || null,
+      displayName: SUPER_ADMIN_NAME,
       companyId,
       role: null,
       action: "reject",
@@ -1018,7 +1199,7 @@ async function notifyAdmins(
           id, company_id, sender_user_id, recipient_user_id, channel, to_address,
           subject, body, link_path, kind
         ) values (
-          ${messageId}, ${companyId}, ${null}, ${text(admin.user_id)}, ${item.channel},
+          ${messageId}, ${companyId}, ${authorUserId}, ${text(admin.user_id)}, ${item.channel},
           ${item.to}, ${subject}, ${body}, ${stagingPath}, ${"staging"}
         )
       `;
@@ -1050,8 +1231,9 @@ export async function askForeman(userId: string, message: string) {
   `;
 
   const system = [
-    "You are Foreman, the assistant inside RCL Design-Build, a construction and field-service desk.",
-    "Help with jobs, RFIs, change orders, daily logs, and dispatch in plain language.",
+    "You are Foreman, the assistant inside RCL Design Build, the Lexington design-build desk.",
+    "The company runs architectural design, residential remodels, additions, restoration, new construction, and commercial fit-up, from schematic design to finish, on budget.",
+    "Help with jobs, RFIs, change orders, daily logs, and site work in plain language.",
     "If the user wants the product itself changed (labels, tagline, phases, statuses, trades, priorities), propose a full replacement of exactly one allowlisted file.",
     "Allowlist: src/product/copy.ts (export const copy) and src/product/workflows.ts (export const workflows).",
     "The object must be JSON-compatible: double-quoted keys and strings. Keep every existing key.",
@@ -1059,6 +1241,7 @@ export async function askForeman(userId: string, message: string) {
     '{"reply":"short plain text","proposal":null}',
     "or",
     '{"reply":"...","proposal":{"title":"...","summary":"...","file":"src/product/copy.ts","content":"full file"}}',
+    "Product changes are not live until Elvira, the super admin, approves them. Say that in the reply when you propose a change.",
     "For ordinary questions, proposal must be null. Never invent financial records.",
     "Current copy.ts:",
     copySource,
@@ -1091,9 +1274,9 @@ export async function askForeman(userId: string, message: string) {
             ${base}, ${drafted.proposal.content}, ${"pending"}, ${stagingToken}
           )
         `;
-        await notifyAdmins(sql, profile.companyId, proposalId, stagingToken, title, summary);
-        if (!/staging/i.test(reply)) {
-          reply = `${reply} Staging link: /stage/${stagingToken}. I sent it to admins by text and email.`;
+        await notifySuperAdmin(sql, profile.companyId, proposalId, stagingToken, title, summary, userId);
+        if (!/elvira/i.test(reply)) {
+          reply = `${reply} I texted Elvira at ${SUPER_ADMIN_PHONE_DISPLAY}. Staging: /stage/${stagingToken}. Nothing goes live until she approves.`;
         }
       }
     } catch (error) {
@@ -1118,7 +1301,9 @@ export async function decideProposal(
   input: { id: string; status: "approved" | "rejected" },
 ) {
   const { sql, profile } = await requireProfile(userId);
-  if (profile.role !== "admin") throw new Error("Only an admin can approve product code.");
+  if (profile.role !== "superadmin") {
+    throw new Error("Only Elvira, the super admin, can approve product code.");
+  }
   const result = await applyDecision(sql, {
     proposalId: input.id,
     companyId: profile.companyId,
