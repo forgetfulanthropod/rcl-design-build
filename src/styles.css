@@ -7,7 +7,7 @@
   --color-surface: #1e1b17;
   --color-raised: #2a251f;
   --color-fg: #f3eee4;
-  --color-muted: #b3a898;
+  --color-muted: #cbbfae; /* AA on bg in sunlight (≈10:1) */
   --color-line: #3a342c;
   --color-copper: #e08a45;
   --color-ink: #141210;
@@ -64,10 +64,40 @@
     min-height: 5.5rem;
     padding-block: 0.7rem;
   }
+  /* Glove mode: big targets, 8 px gaps, 16 px text. */
+  .glove-btn {
+    min-height: 3.5rem;
+  }
+  .glove-gap > * + * {
+    margin-top: 0.5rem;
+  }
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-surface), var(--color-raised), var(--color-surface));
+    background-size: 200% 100%;
+    animation: skeleton 1.2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton {
+      animation: none;
+    }
+  }
   /* iOS Safari zooms the page when a focused control is under 16px. */
   @media (max-width: 767px) {
     .field {
       font-size: 16px;
     }
   }
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
 }

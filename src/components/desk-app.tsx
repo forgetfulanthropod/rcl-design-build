@@ -3,7 +3,9 @@ import { Bot, Building2, LayoutDashboard, Radio, Users, Wrench } from "lucide-re
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
-import { Button } from "@/components/ui";
+import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
+import { navFor } from "@/lib/permissions";
+import { useOnline } from "@/lib/use-online";
 import { CommsView, CrewView, DeskHome, FieldView, ForemanView, JobsView } from "@/components/desk-views";
 import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
 
@@ -23,9 +25,12 @@ export function DeskApp() {
   const [data, setData] = useState<DeskResult | null>(null);
   const [error, setError] = useState("");
   const [view, setView] = useState<View>("desk");
+  const [attempt, setAttempt] = useState(0);
+  const online = useOnline();
 
   useEffect(() => {
     let cancelled = false;
+    setError("");
     loadDesk()
       .then((result) => {
         if (!cancelled) setData(result);
@@ -36,7 +41,7 @@ export function DeskApp() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   async function commit(work: Promise<DeskResult>) {
     setError("");
@@ -49,8 +54,13 @@ export function DeskApp() {
 
   if (!data) {
     return (
-      <main className="grid min-h-dvh place-items-center px-5">
-        <p className="text-muted">{error || "Opening the desk…"}</p>
+      <main className="mx-auto grid min-h-dvh max-w-lg content-center gap-4 px-5">
+        <OfflineBadge online={online} />
+        {error ? (
+          <ErrorBanner message={error} onRetry={() => setAttempt((n) => n + 1)} />
+        ) : (
+          <Skeleton lines={4} label="Opening the desk" />
+        )}
       </main>
     );
   }
@@ -66,7 +76,12 @@ export function DeskApp() {
   }
 
   const ready = data;
-  const label = view === "jobs" ? ready.copy.jobsLabel : view === "field" ? ready.copy.fieldLabel : NAV.find((item) => item.id === view)?.label;
+  const nav = navFor(ready.profile.role)
+    .map((id) => NAV.find((item) => item.id === id))
+    .filter((item): item is (typeof NAV)[number] => Boolean(item));
+  const current = nav.some((item) => item.id === view) ? view : "desk";
+  const label = current === "jobs" ? ready.copy.jobsLabel : current === "field" ? ready.copy.fieldLabel : NAV.find((item) => item.id === current)?.label;
+  
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
@@ -79,8 +94,8 @@ export function DeskApp() {
           </div>
         </div>
         <nav className="mt-6 grid gap-1">
-          {NAV.map((item) => (
-            <NavButton key={item.id} item={item} active={view === item.id} onClick={() => setView(item.id)} />
+          {nav.map((item) => (
+            <NavButton key={item.id} item={item} active={current === item.id} onClick={() => setView(item.id)} />
           ))}
         </nav>
       </aside>
@@ -88,31 +103,41 @@ export function DeskApp() {
         <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div className="min-w-0">
             <p className="truncate font-display text-2xl">{label}</p>
-            <p className="truncate text-sm text-muted">{ready.copy.tagline}</p>
+            <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
           </div>
           <UserButton />
         </header>
-        {error ? <p className="px-4 pt-3 text-sm text-danger">{error}</p> : null}
+        <OfflineBadge online={online} />
+        {error ? (
+          <div className="px-4 pt-3">
+            <ErrorBanner message={error} onRetry={() => setError("")} />
+          </div>
+        ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          {view === "desk" ? <DeskHome data={ready} open={setView} /> : null}
-          {view === "jobs" ? <JobsView data={ready} commit={commit} /> : null}
-          {view === "field" ? <FieldView data={ready} commit={commit} /> : null}
-          {view === "comms" ? <CommsView data={ready} /> : null}
-          {view === "foreman" ? <ForemanView data={ready} commit={commit} /> : null}
-          {view === "crew" ? <CrewView data={ready} commit={commit} /> : null}
+          {current === "desk" ? <DeskHome data={ready} open={setView} /> : null}
+          {current === "jobs" ? <JobsView data={ready} commit={commit} /> : null}
+          {current === "field" ? <FieldView data={ready} commit={commit} /> : null}
+          {current === "comms" ? <CommsView data={ready} /> : null}
+          {current === "foreman" ? <ForemanView data={ready} commit={commit} /> : null}
+          {current === "crew" ? <CrewView data={ready} commit={commit} /> : null}
         </div>
       </div>
-      <nav className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-6 border-t border-line bg-surface md:hidden">
-        {NAV.map((item) => (
+      <nav
+        aria-label="Main"
+        className="pb-safe fixed inset-x-0 bottom-0 z-10 grid border-t border-line bg-surface md:hidden"
+        style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}
+      >
+        {nav.map((item) => (
           <button
             key={item.id}
             type="button"
             onClick={() => setView(item.id)}
-            className={`flex h-16 flex-col items-center justify-center gap-1 text-xs ${
-              view === item.id ? "text-copper" : "text-muted"
+            aria-current={current === item.id ? "page" : undefined}
+            className={`flex h-16 flex-col items-center justify-center gap-1 text-[13px] font-medium ${
+              current === item.id ? "text-copper" : "text-muted"
             }`}
           >
-            <item.icon className="size-5" aria-hidden="true" />
+            <item.icon className="size-6" aria-hidden="true" />
             {item.label}
           </button>
         ))}
