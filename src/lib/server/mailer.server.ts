@@ -112,3 +112,5 @@ export async function deliverOutbound(
     console.warn(`[mailer] could not record status for ${row.id}`, cause instanceof Error ? cause.message : "");
   }
 }
+
+export { linkPreviewAllowed } from "@/lib/server/link-preview.server";
