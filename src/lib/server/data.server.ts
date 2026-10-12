@@ -25,8 +25,11 @@ import {
 } from "@/lib/server/magic.server";
 import { absoluteUrl, deliverOutbound } from "@/lib/server/mailer.server";
 import { taskUpdateError } from "@/lib/tasks";
+import { ACTIONS, assertCan, can, invitableRoles, redactForRole, type Action } from "@/lib/permissions";
 import {
-  ROLES,
+  isFieldRole,
+  normalizeRole,
+  roleLabel,
   SUPER_ADMIN_NAME,
   SUPER_ADMIN_PHONE,
   SUPER_ADMIN_PHONE_DISPLAY,
@@ -74,7 +77,8 @@ async function requireProfile(userId: string): Promise<{ sql: Sql; profile: Prof
     from profiles where user_id = ${userId}
   `;
   const row = rows[0];
-  if (!row || !ROLES.includes(row.role as Role)) {
+  const role = normalizeRole(row?.role);
+  if (!row || !role) {
     throw new Error("Finish company setup first.");
   }
   return {
@@ -85,7 +89,7 @@ async function requireProfile(userId: string): Promise<{ sql: Sql; profile: Prof
       name: text(row.name),
       email: text(row.email),
       phone: text(row.phone),
-      role: row.role as Role,
+      role,
     },
   };
 }
@@ -376,17 +380,18 @@ export async function loadDeskData(userId: string) {
     name: text(rows[0].name),
     email: text(rows[0].email),
     phone: text(rows[0].phone),
-    role: (ROLES.includes(rows[0].role as Role) ? rows[0].role : "field") as Role,
+    role: normalizeRole(rows[0].role) ?? "labor",
   };
   const companyId = profile.companyId;
   await ensureElvira(sql, companyId);
   const again = await sql<{ name: string; phone: string | null; role: string }>`
     select name, phone, role from profiles where user_id = ${userId}
   `;
-  if (again[0] && ROLES.includes(again[0].role as Role)) {
+  const againRole = normalizeRole(again[0]?.role);
+  if (again[0] && againRole) {
     profile.name = text(again[0].name);
     profile.phone = text(again[0].phone);
-    profile.role = again[0].role as Role;
+    profile.role = againRole;
   }
   const companies = await sql<{ name: string }>`select name from companies where id = ${companyId}`;
   const { copy, workflows } = await loadConfig(sql, companyId);
@@ -547,9 +552,14 @@ export async function loadDeskData(userId: string) {
     limit 30
   `;
 
-  return {
+  const fieldOnly = isFieldRole(profile.role);
+  const visibleWorkOrders = fieldOnly
+    ? workOrders.filter((w) => text(w.assigned_user_id) === userId)
+    : workOrders;
+  return redactForRole(profile.role, {
     needsSetup: false as const,
     profile,
+    permissions: Object.fromEntries(ACTIONS.map((a) => [a, can(profile.role, a)])) as Record<Action, boolean>,
     companyName: text(companies[0]?.name) || copy.productName,
     copy,
     workflows,
@@ -605,7 +615,7 @@ export async function loadDeskData(userId: string) {
       weather: text(l.weather),
       notes: text(l.notes),
     })),
-    workOrders: workOrders.map((w) => ({
+    workOrders: visibleWorkOrders.map((w) => ({
       id: text(w.id),
       projectId: text(w.project_id),
       customer: text(w.customer),
@@ -618,7 +628,7 @@ export async function loadDeskData(userId: string) {
       notes: text(w.notes),
       createdAt: text(w.created_at),
     })),
-    crew: crew
+    crew: (can(profile.role, "crew.view") ? crew : crew.filter((c) => text(c.user_id) === userId))
       .map((c) => ({
         userId: text(c.user_id),
         name: text(c.name),
@@ -654,7 +664,7 @@ export async function loadDeskData(userId: string) {
       authorUserId: text(p.author_user_id),
       createdAt: text(p.created_at),
     })),
-  };
+  });
 }
 
 export async function completeSetup(
@@ -722,6 +732,7 @@ export async function createProject(
   },
 ) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "project.create");
   const { workflows } = await loadConfig(sql, profile.companyId);
   if (!workflows.projectPhases.includes(input.phase)) throw new Error("Pick a phase from the list.");
   await sql`
@@ -743,6 +754,7 @@ export async function createProject(
 
 export async function setProjectPhase(userId: string, input: { id: string; phase: string }) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "project.phase");
   const { workflows } = await loadConfig(sql, profile.companyId);
   if (!workflows.projectPhases.includes(input.phase)) throw new Error("Unknown phase.");
   await sql`
@@ -754,9 +766,7 @@ export async function setProjectPhase(userId: string, input: { id: string; phase
 
 export async function archiveProject(userId: string, id: string) {
   const { sql, profile } = await requireProfile(userId);
-  if (profile.role !== "admin" && profile.role !== "superadmin" && profile.role !== "pm") {
-    throw new Error("Only an admin, the super admin, or a PM can archive a job.");
-  }
+  assertCan(profile.role, "project.archive");
   await sql`
     update projects set archived = true
     where id = ${id} and company_id = ${profile.companyId}
@@ -769,6 +779,7 @@ export async function createMilestone(
   input: { projectId: string; name: string; dueOn: string },
 ) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "milestone.create");
   await ownsProject(sql, profile.companyId, input.projectId);
   const due = /^\d{4}-\d{2}-\d{2}$/.test(input.dueOn) ? input.dueOn : null;
   await sql`
@@ -780,6 +791,7 @@ export async function createMilestone(
 
 export async function toggleMilestone(userId: string, id: string) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "milestone.toggle");
   await sql`
     update milestones set done = not done
     where id = ${id} and company_id = ${profile.companyId}
@@ -792,6 +804,7 @@ export async function createRfi(
   input: { projectId: string; title: string; question: string },
 ) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "rfi.create");
   await ownsProject(sql, profile.companyId, input.projectId);
   const { workflows } = await loadConfig(sql, profile.companyId);
   const max = await sql<{ n: number }>`
@@ -809,6 +822,7 @@ export async function createRfi(
 
 export async function setRfiStatus(userId: string, input: { id: string; status: string }) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "rfi.status");
   const { workflows } = await loadConfig(sql, profile.companyId);
   if (!workflows.rfiStatuses.includes(input.status)) throw new Error("Unknown RFI status.");
   await sql`
@@ -823,6 +837,7 @@ export async function createChangeOrder(
   input: { projectId: string; title: string; amount: number },
 ) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "co.create");
   await ownsProject(sql, profile.companyId, input.projectId);
   const { workflows } = await loadConfig(sql, profile.companyId);
   const max = await sql<{ n: number }>`
@@ -841,6 +856,7 @@ export async function createChangeOrder(
 
 export async function setCoStatus(userId: string, input: { id: string; status: string }) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "co.status");
   const { workflows } = await loadConfig(sql, profile.companyId);
   if (!workflows.coStatuses.includes(input.status)) throw new Error("Unknown change-order status.");
   await sql`
@@ -855,6 +871,7 @@ export async function createDailyLog(
   input: { projectId: string; crew: number; weather: string; notes: string },
 ) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "log.create");
   await ownsProject(sql, profile.companyId, input.projectId);
   const today = new Date().toISOString().slice(0, 10);
   await sql`
@@ -881,6 +898,7 @@ export async function createWorkOrder(
   },
 ) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "workorder.create");
   const { workflows } = await loadConfig(sql, profile.companyId);
   if (!workflows.trades.includes(input.trade)) throw new Error("Pick a trade.");
   if (!workflows.priorities.includes(input.priority)) throw new Error("Pick a priority.");
@@ -911,6 +929,21 @@ export async function updateWorkOrder(
     priorities: workflows.priorities,
   });
   if (problem) throw new Error(problem);
+  if (!can(profile.role, "workorder.update")) {
+    assertCan(profile.role, "workorder.updateOwn");
+    const own = await sql<{ assigned_user_id: string | null; priority: string }>`
+      select assigned_user_id, priority from work_orders
+      where id = ${input.id} and company_id = ${profile.companyId}
+    `;
+    if (!own[0] || text(own[0].assigned_user_id) !== userId) {
+      throw new Error("You can only update calls assigned to you.");
+    }
+    await sql`
+      update work_orders set status = ${input.status}, notes = ${input.notes}
+      where id = ${input.id} and company_id = ${profile.companyId}
+    `;
+    return loadDeskData(userId);
+  }
   let assignee: string | null = input.assignedUserId || null;
   if (assignee) {
     const member = await sql<{ user_id: string }>`
@@ -932,14 +965,10 @@ export async function inviteCrew(
   input: { channel: "email" | "sms"; destination: string; name: string; role: string },
 ) {
   const { sql, profile } = await requireProfile(userId);
-  if (profile.role !== "admin" && profile.role !== "superadmin") {
-    throw new Error("Only an admin can invite the crew.");
-  }
-  if (!ROLES.includes(input.role as Role) || input.role === "superadmin") {
-    throw new Error("Pick a role.");
-  }
-  if (input.role === "admin" && profile.role !== "superadmin") {
-    throw new Error("Only Elvira can invite another admin.");
+  assertCan(profile.role, "crew.invite");
+  const inviteRole = normalizeRole(input.role);
+  if (!inviteRole || !invitableRoles(profile.role).includes(inviteRole)) {
+    throw new Error("Pick a role you're allowed to invite.");
   }
   const name = input.name.trim();
   if (name.length < 2) throw new Error("Enter their name.");
@@ -965,14 +994,14 @@ export async function inviteCrew(
     email,
     displayName: name,
     companyId: profile.companyId,
-    role: input.role,
+    role: inviteRole,
     action: null,
     proposalId: null,
     redirectPath: "/",
     minutes: 60 * 24 * 7,
   });
   const subject = `You're on the ${profile.name ? "RCL" : "RCL"} crew`;
-  const body = `${name}, ${profile.name} invited you to RCL Design Build as ${input.role}. Open this single-use link to sign in: ${absoluteUrl(previewPath)}`;
+  const body = `${name}, ${profile.name} invited you to RCL Design Build as ${roleLabel(inviteRole)}. Open this single-use link to sign in: ${absoluteUrl(previewPath)}`;
   const messageId = randomUUID();
   const inviteSubject = `Crew invite for ${name}`;
   await sql`
@@ -1210,6 +1239,7 @@ async function notifySuperAdmin(
 
 export async function askForeman(userId: string, message: string) {
   const { sql, profile } = await requireProfile(userId);
+  assertCan(profile.role, "foreman.use");
   const { copySource, workflowSource } = await loadConfig(sql, profile.companyId);
   const prior = await sql<{ role: string; body: string }>`
     select role, body from foreman_messages
@@ -1301,7 +1331,7 @@ export async function decideProposal(
   input: { id: string; status: "approved" | "rejected" },
 ) {
   const { sql, profile } = await requireProfile(userId);
-  if (profile.role !== "superadmin") {
+  if (!can(profile.role, "code.approve")) {
     throw new Error("Only Elvira, the super admin, can approve product code.");
   }
   const result = await applyDecision(sql, {

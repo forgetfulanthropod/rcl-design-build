@@ -20,8 +20,9 @@ import {
 } from "@/lib/server/fns";
 import { money, stamp } from "@/lib/money";
 import { formatPhone, roleLabel, samePhone, SUPER_ADMIN_PHONE_DISPLAY } from "@/lib/roles";
+import { invitableRoles } from "@/lib/permissions";
 import { groupTasks } from "@/lib/tasks";
-import { Button, Chip, Panel } from "@/components/ui";
+import { Button, Chip, EmptyState, Panel } from "@/components/ui";
 
 export type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
 export type ReadyDesk = Extract<DeskResult, { needsSetup: false }>;
@@ -48,9 +49,11 @@ export function DeskHome({ data, open }: { data: ReadyDesk; open: (view: "jobs" 
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Open jobs" value={String(active.length)} onClick={() => open("jobs")} />
         <Stat label="Open site work" value={String(hot.length)} onClick={() => open("field")} />
-        <Stat label="Waiting on Elvira" value={String(pending.length)} onClick={() => open("foreman")} />
+        {data.permissions["foreman.use"] ? (
+          <Stat label="Waiting on Elvira" value={String(pending.length)} onClick={() => open("foreman")} />
+        ) : null}
       </div>
-      {chart.length > 0 ? (
+      {!data.moneyHidden && chart.length > 0 ? (
         <Panel title="Contract value">
           <div className="h-40 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -123,10 +126,12 @@ export function JobsView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
   return (
     <div className="grid gap-4 lg:grid-cols-[16rem_1fr]">
       <div className="grid content-start gap-2">
-        <Button tone="ghost" onClick={() => setOpenForm((value) => !value)}>
-          {openForm ? "Close" : "New job"}
-        </Button>
-        {openForm ? (
+        {data.permissions["project.create"] ? (
+          <Button tone="ghost" onClick={() => setOpenForm((value) => !value)}>
+            {openForm ? "Close" : "New job"}
+          </Button>
+        ) : null}
+        {openForm && data.permissions["project.create"] ? (
           <form
             className="grid gap-2 rounded-md border border-line bg-surface p-3"
             onSubmit={(event) => {
@@ -173,7 +178,11 @@ export function JobsView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
           </button>
         ))}
       </div>
-      {job ? <JobDetail job={job} data={data} commit={commit} /> : <p className="text-muted">No jobs yet.</p>}
+      {job ? (
+        <JobDetail job={job} data={data} commit={commit} />
+      ) : (
+        <EmptyState title="No jobs yet" body={data.permissions["project.create"] ? "Tap New job to add the first one." : "Your lead will add you to a job."} />
+      )}
     </div>
   );
 }
@@ -212,7 +221,7 @@ function JobDetail({
               {job.clientName} · {job.address}
             </p>
           </div>
-          <p className="font-display text-2xl tabular-nums">{money(job.contractValue)}</p>
+          {data.moneyHidden ? null : <p className="font-display text-2xl tabular-nums">{money(job.contractValue)}</p>}
         </div>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted">{job.summary}</p>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -230,8 +239,7 @@ function JobDetail({
             </button>
           ))}
         </div>
-        {!job.archived &&
-        (data.profile.role === "admin" || data.profile.role === "superadmin" || data.profile.role === "pm") ? (
+        {!job.archived && data.permissions["project.archive"] ? (
           <button
             type="button"
             className="mt-3 text-sm text-muted"
@@ -259,6 +267,7 @@ function JobDetail({
               </li>
             ))}
           </ul>
+          {data.permissions["milestone.create"] ? (
           <form
             className="mt-3 grid gap-2"
             onSubmit={(event) => {
@@ -273,6 +282,7 @@ function JobDetail({
               Add milestone
             </Button>
           </form>
+          ) : null}
         </Panel>
         <Panel title="Sheets">
           <ul className="grid gap-2 text-sm">
@@ -335,7 +345,7 @@ function JobDetail({
               <li key={order.id} className="flex items-center justify-between gap-2 text-sm">
                 <span>
                   CO {order.number} {order.title}
-                  <span className="ml-2 tabular-nums text-muted">{money(order.amount)}</span>
+                  {data.moneyHidden ? null : <span className="ml-2 tabular-nums text-muted">{money(order.amount)}</span>}
                 </span>
                 <select
                   className="field h-11 w-auto md:h-9"
@@ -351,6 +361,7 @@ function JobDetail({
               </li>
             ))}
           </ul>
+          {data.permissions["co.create"] ? (
           <form
             className="mt-3 grid gap-2"
             onSubmit={(event) => {
@@ -370,6 +381,7 @@ function JobDetail({
               Add change order
             </Button>
           </form>
+          ) : null}
         </Panel>
       </div>
       <Panel title="Daily log">
@@ -426,6 +438,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
 
   return (
     <div className="grid gap-4">
+      {data.permissions["workorder.create"] ? (
       <form
         className="grid gap-2 rounded-md border border-line bg-surface p-4 md:grid-cols-2"
         onSubmit={(event) => {
@@ -447,7 +460,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
             <option key={item}>{item}</option>
           ))}
         </select>
-        <select className="field" value={priority} onChange={(e) => setPriority(e.target.value)}>
+        <select className="field" aria-label="Priority" disabled={!data.permissions["workorder.update"]} value={priority} onChange={(e) => setPriority(e.target.value)}>
           {data.workflows.priorities.map((item) => (
             <option key={item}>{item}</option>
           ))}
@@ -467,6 +480,7 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
           Add to the board
         </Button>
       </form>
+      ) : null}
       <div className="flex gap-3 overflow-x-auto pb-2">
         {grouped.map((column) => (
           <section key={column.status} className="w-64 shrink-0 rounded-md border border-line bg-bg p-2">
@@ -544,12 +558,12 @@ function OrderEditor({
             <option key={item}>{item}</option>
           ))}
         </select>
-        <select className="field" value={priority} onChange={(e) => setPriority(e.target.value)}>
+        <select className="field" aria-label="Priority" disabled={!data.permissions["workorder.update"]} value={priority} onChange={(e) => setPriority(e.target.value)}>
           {data.workflows.priorities.map((item) => (
             <option key={item}>{item}</option>
           ))}
         </select>
-        <select className="field" aria-label="Assigned to" value={assignedUserId} onChange={(e) => setAssignedUserId(e.target.value)}>
+        <select className="field" aria-label="Assigned to" disabled={!data.permissions["workorder.update"]} value={assignedUserId} onChange={(e) => setAssignedUserId(e.target.value)}>
           <option value="">Unassigned</option>
           {data.crew.map((person) => (
             <option key={person.userId} value={person.userId}>
@@ -701,7 +715,8 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
   const [channel, setChannel] = useState<"email" | "sms">("sms");
   const [destination, setDestination] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState("field");
+  const roleOptions = invitableRoles(data.profile.role);
+  const [role, setRole] = useState<string>(roleOptions.includes("labor") ? "labor" : (roleOptions[0] ?? "labor"));
   const [sent, setSent] = useState("");
   const [error, setError] = useState("");
 
@@ -723,7 +738,7 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
         </ul>
       </Panel>
       <Panel title="Invite">
-        {data.profile.role !== "admin" && data.profile.role !== "superadmin" ? (
+        {!data.permissions["crew.invite"] ? (
           <p className="text-sm text-muted">Only an admin can send email or text invites.</p>
         ) : (
           <form
@@ -770,10 +785,7 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
               required
             />
             <select className="field" value={role} onChange={(e) => setRole(e.target.value)}>
-              {(data.profile.role === "superadmin"
-                ? ["field", "superintendent", "pm", "office", "admin"]
-                : ["field", "superintendent", "pm", "office"]
-              ).map((item) => (
+              {roleOptions.map((item) => (
                 <option key={item} value={item}>
                   {roleLabel(item)}
                 </option>

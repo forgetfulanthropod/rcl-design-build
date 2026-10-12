@@ -3,11 +3,10 @@ import { getSql, type Sql } from "@/lib/db";
 import { validateSource } from "@/lib/product";
 import { absoluteUrl, isMailerConfigured, sendEmail } from "@/lib/server/mailer.server";
 import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
-import { ROLES } from "@/lib/roles";
+import { normalizeRole } from "@/lib/roles";
 import { canReplayConsumedLink, safeRedirect } from "@/lib/sign-in-complete";
 
 const SMS_DOMAIN = "crew.rcl.build";
-const ROLE_SET = new Set<string>(ROLES);
 
 export function normalizeEmail(raw: string): string | null {
   const email = raw.trim().toLowerCase();
@@ -303,8 +302,8 @@ export async function consumeToken(raw: string): Promise<
   `;
 
   const companyId = text(link.company_id);
-  const role = text(link.role);
-  if (companyId && ROLE_SET.has(role)) {
+  const role = normalizeRole(text(link.role));
+  if (companyId && role) {
     const existing = await sql<{ user_id: string }>`
       select user_id from profiles where user_id = ${userId}
     `;

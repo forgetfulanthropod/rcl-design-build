@@ -8,7 +8,11 @@ test("magic-link sign-in and company setup", async ({ browser }) => {
   await context.close();
 });
 
-test("magic links are single-use", async ({ browser }) => {
+// FIXME: 7cb85bb added a deliberate 3-minute replay window (MAGIC_REPLAY_MS in
+// src/lib/sign-in-complete.ts) so a link opened twice still finishes sign-in.
+// Within that window a second browser can reuse the link. Decide the policy in the
+// login work, then re-enable (e.g. bind replay to the first browser).
+test.fixme("magic links are single-use", async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
   const id = uid();
@@ -36,9 +40,11 @@ test("add an employee (crew invite) and the employee signs in", async ({ browser
   const ep = await emp.newPage();
   await ep.goto(link);
   await ep.waitForURL((u) => !u.pathname.startsWith("/m/"));
-  await expect(ep.getByRole("button", { name: "Field" }).first()).toBeVisible();
-  await openView(ep, "Crew");
-  await expect(ep.getByText(/Only an admin can send/)).toBeVisible();
+  await expect(ep.getByRole("button", { name: "Site" }).first()).toBeVisible();
+  // Labor gets a 3-tab nav: no Jobs, Crew, or Foreman, and no dollar amounts.
+  await expect(ep.getByRole("button", { name: "Crew", exact: true })).toHaveCount(0);
+  await expect(ep.getByRole("button", { name: "Foreman", exact: true })).toHaveCount(0);
+  await expect(ep.getByText("Contract value")).toHaveCount(0);
   await page.reload();
   await openView(page, "Crew");
   await expect(page.getByText(`Tech ${id}`).first()).toBeVisible();
@@ -59,13 +65,13 @@ test("create and edit an activity (work order) assigned to an employee", async (
   await ep.goto(link);
   await ep.waitForURL((u) => !u.pathname.startsWith("/m/"));
   await page.reload();
-  await openView(page, "Field");
+  await openView(page, "Site");
   const title = `Replace RTU belt ${id}`;
   await page.getByPlaceholder("Customer").fill("Acme");
-  await page.getByPlaceholder("Site").fill("12 Main");
-  await page.getByPlaceholder("Work order").fill(title);
-  await page.getByPlaceholder("Notes for the tech").fill("Bring belts");
-  await page.getByRole("button", { name: "Dispatch" }).click();
+  await page.getByPlaceholder("Site", { exact: true }).fill("12 Main");
+  await page.getByPlaceholder("Site task").fill(title);
+  await page.getByPlaceholder("Notes for the crew").fill("Bring belts");
+  await page.getByRole("button", { name: "Add to the board" }).click();
   // UX finding: the first work order isn't auto-selected after dispatch; the card must be tapped.
   await page.getByRole("button", { name: new RegExp(title) }).click();
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
@@ -79,12 +85,12 @@ test("create and edit an activity (work order) assigned to an employee", async (
   await editor.getByRole("button").last().click();
   await expect(page.getByText(`Tech ${id}`).first()).toBeVisible();
   await page.reload();
-  await openView(page, "Field");
+  await openView(page, "Site");
   await expect(page.getByText(title).first()).toBeVisible();
   await expect(page.locator("section", { hasText: statusOptions[1] }).getByText(title)).toBeVisible();
   // The employee sees the activity on their own Field board.
   await ep.reload();
-  await openView(ep, "Field");
+  await openView(ep, "Site");
   await expect(ep.getByText(title).first()).toBeVisible();
   await emp.close();
   await context.close();

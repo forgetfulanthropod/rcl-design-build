@@ -51,7 +51,7 @@ export async function createJob(page: Page, name: string) {
 }
 
 /** Invite a crew member by email; returns the single-use link the dev fallback shows. */
-export async function inviteByEmail(page: Page, name: string, email: string, role = "field") {
+export async function inviteByEmail(page: Page, name: string, email: string, role = "labor") {
   await openView(page, "Crew");
   await page.getByRole("button", { name: "Email", exact: true }).click();
   await page.getByPlaceholder("Name").fill(name);

@@ -64,35 +64,43 @@ for (const vp of VIEWPORTS) {
     await ep.waitForTimeout(300);
     await ep.screenshot({ path: `${OUT}/${tag}-02-loading.png` });
     await ep.unroute("**/_serverFn/**");
-    await expect(ep.getByRole("button", { name: "Field" }).first()).toBeVisible();
+    await expect(ep.getByRole("button", { name: "Site" }).first()).toBeVisible();
 
     await ep.screenshot({ path: `${OUT}/${tag}-03-desk.png`, fullPage: true });
     report.desk = await audit(ep);
 
-    await openView(ep, "Field");
+    await openView(ep, "Site");
     await ep.screenshot({ path: `${OUT}/${tag}-04-field-empty.png`, fullPage: true });
     report.fieldEmpty = await audit(ep);
 
     // Admin dispatches two work orders, one assigned to the employee.
     await page.reload();
-    await openView(page, "Field");
+    await openView(page, "Site");
     for (const t of [`Replace RTU belt on the north roof unit ${id}`, `No-heat call ${id}`]) {
       await page.getByPlaceholder("Customer").fill("Acme Property Management LLC");
-      await page.getByPlaceholder("Site").fill("1200 Long Industrial Parkway, Building C");
-      await page.getByPlaceholder("Work order").fill(t);
-      await page.getByRole("button", { name: "Dispatch" }).click();
+      await page.getByPlaceholder("Site", { exact: true }).fill("1200 Long Industrial Parkway, Building C");
+      await page.getByPlaceholder("Site task").fill(t);
+      await page.getByRole("button", { name: "Add to the board" }).click();
       await expect(page.getByRole("button", { name: new RegExp(t) })).toBeVisible();
+    }
+    // Labor only sees calls assigned to them: assign both.
+    for (const t of [`Replace RTU belt on the north roof unit ${id}`, `No-heat call ${id}`]) {
+      await page.getByRole("button", { name: new RegExp(t) }).click();
+      const editor = page.locator("form", { has: page.getByRole("heading", { name: new RegExp(t) }) });
+      await editor.getByLabel("Assigned to").selectOption({ label: `Tech ${id}` });
+      await editor.getByRole("button", { name: "Update call" }).click();
+      await expect(editor.getByLabel("Assigned to")).toHaveValue(/.+/);
     }
 
     await ep.reload();
-    await openView(ep, "Field");
+    await openView(ep, "Site");
     await ep.screenshot({ path: `${OUT}/${tag}-05-field-orders.png`, fullPage: true });
     report.fieldOrders = await audit(ep);
     await ep.getByRole("button", { name: /No-heat call/ }).click();
     await ep.screenshot({ path: `${OUT}/${tag}-06-field-order-open.png`, fullPage: true });
     report.fieldOrderOpen = await audit(ep);
 
-    for (const [i, v] of (["Jobs", "Radio", "Crew"] as const).entries()) {
+    for (const [i, v] of (["Log"] as const).entries()) {
       await openView(ep, v);
       await ep.screenshot({ path: `${OUT}/${tag}-0${7 + i}-${v.toLowerCase()}.png`, fullPage: true });
       report[v.toLowerCase()] = await audit(ep);
