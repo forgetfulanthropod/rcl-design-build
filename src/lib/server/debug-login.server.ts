@@ -13,13 +13,13 @@ import type { Role } from "@/lib/roles";
 export const DEBUG_ROLES = ["owner", "admin", "lead", "labor", "subcontractor"] as const;
 export type DebugRole = (typeof DEBUG_ROLES)[number];
 
-/** Personas mapped onto today's roles (src/lib/roles.ts). Switch to the roles-foundation names when it lands. */
+/** Personas use the roles-foundation roles (src/lib/roles.ts). */
 export const DEBUG_ROLE_MAP: Record<DebugRole, { role: Role; name: string; email: string; phone: string | null }> = {
-  owner: { role: "admin", name: "Olivia Grant", email: "owner@demo.rcl.test", phone: null },
+  owner: { role: "owner", name: "Olivia Grant", email: "owner@demo.rcl.test", phone: null },
   admin: { role: "admin", name: "Adam Price", email: "admin@demo.rcl.test", phone: null },
-  lead: { role: "superintendent", name: "Lena Ortiz", email: "lead@demo.rcl.test", phone: null },
-  labor: { role: "field", name: "Luis Moreno", email: "labor@demo.rcl.test", phone: null },
-  subcontractor: { role: "field", name: "Sam Whitfield (Bluegrass Electric)", email: "sub@demo.rcl.test", phone: null },
+  lead: { role: "lead", name: "Lena Ortiz", email: "lead@demo.rcl.test", phone: null },
+  labor: { role: "labor", name: "Luis Moreno", email: "labor@demo.rcl.test", phone: null },
+  subcontractor: { role: "sub", name: "Sam Whitfield (Bluegrass Electric)", email: "sub@demo.rcl.test", phone: null },
 };
 
 const DEMO_EMAILS = Object.values(DEBUG_ROLE_MAP).map((p) => p.email);

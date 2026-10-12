@@ -46,7 +46,7 @@ for (const [role, name] of ROLES) {
     await page.goto("/");
     await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
     await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "Crew" }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(name).first()).toBeVisible();
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/390x844-${role}.png`, fullPage: true });
@@ -60,7 +60,7 @@ async function signInAs(browser: import("@playwright/test").Browser, role: strin
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
   await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "Crew" }).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
 
