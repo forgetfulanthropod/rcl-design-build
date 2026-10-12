@@ -219,7 +219,7 @@ function JobDetail({
               type="button"
               disabled={job.archived}
               onClick={() => void commit(setProjectPhase({ data: { id: job.id, phase } }))}
-              className={`h-9 rounded-full px-3 text-sm ${
+              className={`h-11 rounded-full px-3 text-sm md:h-9 ${
                 job.phase === phase ? "bg-copper text-ink" : "bg-raised text-fg"
               }`}
             >
@@ -242,9 +242,10 @@ function JobDetail({
           <ul className="grid gap-2">
             {milestones.map((item) => (
               <li key={item.id}>
-                <label className="flex items-center gap-2 text-sm">
+                <label className="flex min-h-11 items-center gap-3 text-sm md:min-h-0">
                   <input
                     type="checkbox"
+                    className="size-5 shrink-0 accent-copper"
                     checked={item.done}
                     onChange={() => void commit(toggleMilestone({ data: item.id }))}
                   />
@@ -293,7 +294,7 @@ function JobDetail({
                     {rfi.number}. {rfi.title}
                   </p>
                   <select
-                    className="field h-9 w-auto"
+                    className="field h-11 w-auto md:h-9"
                     value={rfi.status}
                     onChange={(event) =>
                       void commit(setRfiStatus({ data: { id: rfi.id, status: event.target.value } }))
@@ -333,7 +334,7 @@ function JobDetail({
                   <span className="ml-2 tabular-nums text-muted">{money(order.amount)}</span>
                 </span>
                 <select
-                  className="field h-9 w-auto"
+                  className="field h-11 w-auto md:h-9"
                   value={order.status}
                   onChange={(event) =>
                     void commit(setCoStatus({ data: { id: order.id, status: event.target.value } }))
@@ -391,7 +392,7 @@ function JobDetail({
           }}
         >
           <div className="grid gap-2 sm:grid-cols-2">
-            <input className="field" inputMode="numeric" value={crew} onChange={(e) => setCrew(e.target.value)} />
+            <input className="field" inputMode="numeric" aria-label="Crew on site" placeholder="Crew on site" value={crew} onChange={(e) => setCrew(e.target.value)} />
             <input className="field" placeholder="Weather" value={weather} onChange={(e) => setWeather(e.target.value)} />
           </div>
           <textarea className="field" placeholder="What happened" value={notes} onChange={(e) => setNotes(e.target.value)} required />
@@ -475,7 +476,15 @@ export function FieldView({ data, commit }: { data: ReadyDesk; commit: Commit })
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setActive(item.id)}
+                  onClick={() => {
+                    setActive(item.id);
+                    // On phones the editor sits below the board; bring it into view.
+                    if (window.matchMedia("(max-width: 767px)").matches) {
+                      requestAnimationFrame(() =>
+                        document.getElementById("order-editor")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                      );
+                    }
+                  }}
                   className={`rounded-md border p-3 text-left ${
                     item.id === active ? "border-copper bg-surface" : "border-line bg-surface"
                   }`}
@@ -517,7 +526,8 @@ function OrderEditor({
 
   return (
     <form
-      className="grid gap-2 rounded-md border border-line bg-surface p-4"
+      id="order-editor"
+      className="grid scroll-mt-4 gap-2 rounded-md border border-line bg-surface p-4"
       onSubmit={(event) => {
         event.preventDefault();
         void commit(updateWorkOrder({ data: { id: order.id, status, priority, assignedUserId, notes } }));
@@ -539,7 +549,7 @@ function OrderEditor({
             <option key={item}>{item}</option>
           ))}
         </select>
-        <select className="field" value={assignedUserId} onChange={(e) => setAssignedUserId(e.target.value)}>
+        <select className="field" aria-label="Assigned to" value={assignedUserId} onChange={(e) => setAssignedUserId(e.target.value)}>
           <option value="">Unassigned</option>
           {data.crew.map((person) => (
             <option key={person.userId} value={person.userId}>
@@ -548,7 +558,7 @@ function OrderEditor({
           ))}
         </select>
       </div>
-      <textarea className="field" value={notes} onChange={(e) => setNotes(e.target.value)} />
+      <textarea className="field" aria-label="Call notes" placeholder="Call notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
       <Button type="submit" tone="ghost">
         Update call
       </Button>
