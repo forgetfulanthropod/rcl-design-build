@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { validateSource } from "@/lib/product";
-import { absoluteUrl, isMailerConfigured, sendEmail } from "@/lib/server/mailer.server";
+import { absoluteUrl, isMailerConfigured, linkPreviewAllowed, sendEmail } from "@/lib/server/mailer.server";
 import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
 import { ROLES } from "@/lib/roles";
 import { canReplayConsumedLink, safeRedirect } from "@/lib/sign-in-complete";
@@ -156,13 +156,16 @@ export async function requestLoginLink(input: {
     if (!result.ok) return { ok: false, error: "We could not send the text. Try again in a minute." };
     return { ok: true, emailed: false, channel: input.channel, destination };
   }
-  if (process.env.NODE_ENV === "production") {
+  if (!linkPreviewAllowed()) {
     return {
       ok: false,
-      error: input.channel === "email" ? "Email sign-in is not configured yet." : "Text sign-in is not configured yet.",
+      error:
+        input.channel === "email"
+          ? "Email sign-in isn't set up on this desk yet. Ask an admin, or sign in another way."
+          : "Text sign-in isn't set up on this desk yet. Ask an admin, or sign in another way.",
     };
   }
-  // Dev fallback when the provider is not configured: show the link on screen.
+  // Explicit dev preview (DEV_LINK_PREVIEW=true): show the link on screen.
   return { ok: true, emailed: false, previewPath, channel: input.channel, destination };
 }
 

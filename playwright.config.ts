@@ -22,6 +22,7 @@ export default defineConfig({
         timeout: 120_000,
         env: {
           DATABASE_URL: "",
+          DEV_LINK_PREVIEW: process.env.DEV_LINK_PREVIEW ?? "true",
           RESEND_API_KEY: "",
           TWILIO_ACCOUNT_SID: "",
           TWILIO_AUTH_TOKEN: "",
