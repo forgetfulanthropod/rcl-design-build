@@ -23,6 +23,7 @@ import {
   normalizePhone,
   phoneToEmail,
 } from "@/lib/server/magic.server";
+import { absoluteUrl, deliverOutbound } from "@/lib/server/mailer.server";
 
 const ROLES = ["admin", "pm", "superintendent", "field", "office"] as const;
 type Role = (typeof ROLES)[number];
@@ -791,15 +792,24 @@ export async function inviteCrew(
     minutes: 60 * 24 * 7,
   });
   const subject = `You're on the ${profile.name ? "RCL" : "RCL"} crew`;
-  const body = `${name}, ${profile.name} invited you to RCL Design-Build as ${input.role}. Open this single-use link to sign in: ${previewPath}`;
+  const body = `${name}, ${profile.name} invited you to RCL Design-Build as ${input.role}. Open this single-use link to sign in: ${absoluteUrl(previewPath)}`;
+  const messageId = randomUUID();
+  const inviteSubject = `Crew invite for ${name}`;
   await sql`
     insert into outbound_messages (
       id, company_id, sender_user_id, recipient_user_id, channel, to_address, subject, body, link_path, kind
     ) values (
-      ${randomUUID()}, ${profile.companyId}, ${userId}, ${null}, ${input.channel},
-      ${destination}, ${`Crew invite for ${name}`}, ${body}, ${previewPath}, ${"invite"}
+      ${messageId}, ${profile.companyId}, ${userId}, ${null}, ${input.channel},
+      ${destination}, ${inviteSubject}, ${body}, ${previewPath}, ${"invite"}
     )
   `;
+  await deliverOutbound(sql, {
+    id: messageId,
+    channel: input.channel,
+    to: destination,
+    subject: inviteSubject,
+    body,
+  });
   return { previewPath, subject };
 }
 
@@ -992,24 +1002,27 @@ async function notifyAdmins(
       `Foreman drafted a product change: ${title}.`,
       summary,
       ``,
-      `Staging build: ${stagingPath}`,
-      `Approve (signs you in): ${approve}`,
-      `Reject (signs you in): ${reject}`,
+      `Staging build: ${absoluteUrl(stagingPath)}`,
+      `Approve (signs you in): ${absoluteUrl(approve)}`,
+      `Reject (signs you in): ${absoluteUrl(reject)}`,
     ].join("\n");
     const channels: { channel: "email" | "sms"; to: string }[] = [];
     if (loginEmail && !isSyntheticEmail(loginEmail)) channels.push({ channel: "email", to: loginEmail });
     if (phone) channels.push({ channel: "sms", to: phone });
     if (channels.length === 0) channels.push({ channel: "email", to: loginEmail });
     for (const item of channels) {
+      const messageId = randomUUID();
+      const subject = `Approve staging: ${title}`;
       await sql`
         insert into outbound_messages (
           id, company_id, sender_user_id, recipient_user_id, channel, to_address,
           subject, body, link_path, kind
         ) values (
-          ${randomUUID()}, ${companyId}, ${null}, ${text(admin.user_id)}, ${item.channel},
-          ${item.to}, ${`Approve staging: ${title}`}, ${body}, ${stagingPath}, ${"staging"}
+          ${messageId}, ${companyId}, ${null}, ${text(admin.user_id)}, ${item.channel},
+          ${item.to}, ${subject}, ${body}, ${stagingPath}, ${"staging"}
         )
       `;
+      await deliverOutbound(sql, { id: messageId, channel: item.channel, to: item.to, subject, body });
     }
   }
 }

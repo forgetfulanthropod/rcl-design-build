@@ -15,7 +15,7 @@ function Login() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [sent, setSent] = useState<{ path: string; destination: string; channel: "email" | "sms" } | null>(
+  const [sent, setSent] = useState<{ path: string | null; destination: string; channel: "email" | "sms" } | null>(
     null,
   );
   const [passwordEmail, setPasswordEmail] = useState("");
@@ -39,7 +39,7 @@ function Login() {
         setError(result.error);
         return;
       }
-      setSent({ path: result.previewPath, destination: result.destination, channel: result.channel });
+      setSent({ path: result.previewPath ?? null, destination: result.destination, channel: result.channel });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not send the link.");
     } finally {
@@ -128,13 +128,22 @@ function Login() {
         </Button>
         {sent ? (
           <div className="mt-4 rounded-md border border-line bg-surface p-4">
-            <p className="text-sm text-fg">
-              {sent.channel === "email" ? "Email" : "Text"} queued for {sent.destination}. This desk
-              has no phone carrier, so the message is also here.
-            </p>
-            <a href={sent.path} className="mt-3 inline-flex h-11 items-center text-sm font-medium text-copper">
-              Open the magic link
-            </a>
+            {sent.path ? (
+              <>
+                <p className="text-sm text-fg">
+                  {sent.channel === "email" ? "Email" : "Text"} delivery is not set up on this desk, so
+                  the link for {sent.destination} is here.
+                </p>
+                <a href={sent.path} className="mt-3 inline-flex h-11 items-center text-sm font-medium text-copper">
+                  Open the magic link
+                </a>
+              </>
+            ) : (
+              <p className="text-sm text-fg">
+                Check your email. We sent a single-use sign-in link to {sent.destination}. It expires in
+                30 minutes.
+              </p>
+            )}
           </div>
         ) : null}
         {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}

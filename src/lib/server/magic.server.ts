@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { validateSource } from "@/lib/product";
+import { absoluteUrl, isMailerConfigured, sendEmail } from "@/lib/server/mailer.server";
 
 const SMS_DOMAIN = "crew.rcl.build";
 const ROLES = new Set(["admin", "pm", "superintendent", "field", "office"]);
@@ -79,7 +80,14 @@ export async function requestLoginLink(input: {
   destination: string;
   name: string;
 }): Promise<
-  | { ok: true; previewPath: string; channel: "email" | "sms"; destination: string }
+  | {
+      ok: true;
+      /** Only present as a dev fallback when no mailer is configured. */
+      previewPath?: string;
+      emailed: boolean;
+      channel: "email" | "sms";
+      destination: string;
+    }
   | { ok: false; error: string }
 > {
   const name = input.name.trim().slice(0, 80);
@@ -118,7 +126,29 @@ export async function requestLoginLink(input: {
     redirectPath: "/",
     minutes: 30,
   });
-  return { ok: true, previewPath, channel: input.channel, destination };
+  if (input.channel === "email" && isMailerConfigured()) {
+    const url = absoluteUrl(previewPath);
+    const result = await sendEmail({
+      to: destination,
+      subject: "Your RCL Design-Build sign-in link",
+      text: [
+        name ? `Hi ${name},` : "Hi,",
+        "",
+        "Open this single-use link to sign in to RCL Design-Build. It expires in 30 minutes.",
+        "",
+        url,
+        "",
+        "If you did not ask for this, you can ignore this email.",
+      ].join("\n"),
+    });
+    if (!result.ok) return { ok: false, error: "We could not send the email. Try again in a minute." };
+    return { ok: true, emailed: true, channel: input.channel, destination };
+  }
+  if (process.env.NODE_ENV === "production" && input.channel === "email") {
+    return { ok: false, error: "Email sign-in is not configured yet." };
+  }
+  // Dev fallback (or SMS, which has no carrier yet): show the link on screen.
+  return { ok: true, emailed: false, previewPath, channel: input.channel, destination };
 }
 
 async function ensureUser(sql: Sql, email: string, name: string): Promise<string> {
