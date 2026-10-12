@@ -23,7 +23,7 @@ import {
   normalizePhone,
   phoneToEmail,
 } from "@/lib/server/magic.server";
-import { absoluteUrl, deliverOutbound } from "@/lib/server/mailer.server";
+import { absoluteUrl, deliverOutbound, linkPreviewAllowed } from "@/lib/server/mailer.server";
 import { taskUpdateError } from "@/lib/tasks";
 import { ACTIONS, assertCan, can, invitableRoles, redactForRole, type Action } from "@/lib/permissions";
 import {
@@ -1019,7 +1019,8 @@ export async function inviteCrew(
     subject: inviteSubject,
     body,
   });
-  return { previewPath, subject };
+  // The admin only gets the raw link back when on-screen previews are explicitly enabled.
+  return { previewPath: linkPreviewAllowed() ? previewPath : null, subject };
 }
 
 function clip(value: string, max: number): string {

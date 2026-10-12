@@ -752,7 +752,7 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
               void inviteCrew({ data: { channel, destination, name, role } })
                 .then((result) => {
                   setError("");
-                  setSent(result.previewPath);
+                  setSent(result.previewPath ?? "sent");
                   setDestination("");
                   setName("");
                   return commit(loadDesk());
@@ -796,9 +796,11 @@ export function CrewView({ data, commit }: { data: ReadyDesk; commit: Commit }) 
             </p>
             <Button type="submit">Send invite</Button>
             {error ? <p className="text-sm text-danger">{error}</p> : null}
-            {sent ? (
+            {sent === "sent" ? (
+              <p className="text-sm text-muted">Invite sent. They sign in from the link in their email or text.</p>
+            ) : sent ? (
               <p className="text-sm text-muted">
-                Queued. Hand them this single-use link if you are standing next to them:{" "}
+                Dev preview. Hand them this single-use link if you are standing next to them:{" "}
                 <a className="text-copper underline" href={sent}>
                   {sent}
                 </a>
