@@ -4,7 +4,8 @@ import { createJob, inviteByEmail, newAdmin, openView, uid } from "./helpers";
 
 test("magic-link sign-in and company setup", async ({ browser }) => {
   const { page, context } = await newAdmin(browser);
-  await expect(page.getByText(/Desk/).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reports", exact: true }).locator("visible=true")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Attention", exact: true }).locator("visible=true")).toHaveCount(1);
   await context.close();
 });
 
@@ -27,13 +28,13 @@ test("add an employee (crew invite) and the employee signs in", async ({ browser
   const ep = await emp.newPage();
   await ep.goto(link);
   await ep.waitForURL((u) => !u.pathname.startsWith("/m/"));
-  await expect(ep.getByRole("button", { name: "Site" }).first()).toBeVisible();
+  await expect(ep.getByRole("button", { name: "Today" }).first()).toBeVisible();
   // Labor gets a 3-tab nav: no Jobs, Crew, or Foreman, and no dollar amounts.
   await expect(ep.getByRole("button", { name: "Crew", exact: true })).toHaveCount(0);
   await expect(ep.getByRole("button", { name: "Foreman", exact: true })).toHaveCount(0);
   await expect(ep.getByText("Contract value")).toHaveCount(0);
   await page.reload();
-  await openView(page, "Crew");
+  await openView(page, "Team");
   await expect(page.getByText(`Tech ${id}`).first()).toBeVisible();
   await emp.close();
   await context.close();
@@ -44,7 +45,8 @@ test.skip("remove an employee", async () => {
   // src/lib/server/data.server.ts or CrewView. Unskip once it exists.
 });
 
-test("create and edit an activity (work order) assigned to an employee", async ({ browser }) => {
+// Hidden in the slim daily-report app (views still in desk-views.tsx, not in nav).
+test.skip("create and edit an activity (work order) assigned to an employee", async ({ browser }) => {
   const { page, context, id } = await newAdmin(browser);
   const link = await inviteByEmail(page, `Tech ${id}`, `tech-${id}@example.test`);
   const emp = await browser.newContext();
@@ -87,7 +89,8 @@ test.skip("delete an activity (work order)", async () => {
   // NOT IMPLEMENTED: no delete action for work orders or daily logs exists.
 });
 
-test("log a daily activity on a job", async ({ browser }) => {
+// Hidden in the slim daily-report app (views still in desk-views.tsx, not in nav).
+test.skip("log a daily activity on a job", async ({ browser }) => {
   const { page, context, id } = await newAdmin(browser);
   const job = `Kitchen ${id}`;
   await createJob(page, job);
@@ -98,7 +101,8 @@ test("log a daily activity on a job", async ({ browser }) => {
   await context.close();
 });
 
-test("archive a job", async ({ browser }) => {
+// Hidden in the slim daily-report app (views still in desk-views.tsx, not in nav).
+test.skip("archive a job", async ({ browser }) => {
   const { page, context, id } = await newAdmin(browser);
   const job = `Archive me ${id}`;
   await createJob(page, job);
@@ -123,7 +127,8 @@ test.skip("upload a takeoff spreadsheet", async () => {
   // NOT IMPLEMENTED: no spreadsheet import. Fixture kept at e2e/fixtures/takeoff-sample.csv for when it lands.
 });
 
-test("RFI and change order on a job", async ({ browser }) => {
+// Hidden in the slim daily-report app (views still in desk-views.tsx, not in nav).
+test.skip("RFI and change order on a job", async ({ browser }) => {
   const { page, context, id } = await newAdmin(browser);
   await createJob(page, `RFI job ${id}`);
   await page.getByPlaceholder("RFI title").fill(`Beam size ${id}`);
@@ -137,7 +142,8 @@ test("RFI and change order on a job", async ({ browser }) => {
   await context.close();
 });
 
-test("milestone add and toggle", async ({ browser }) => {
+// Hidden in the slim daily-report app (views still in desk-views.tsx, not in nav).
+test.skip("milestone add and toggle", async ({ browser }) => {
   const { page, context, id } = await newAdmin(browser);
   await createJob(page, `MS job ${id}`);
   await page.getByPlaceholder("New milestone").fill(`Rough-in ${id}`);

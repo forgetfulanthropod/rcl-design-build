@@ -1101,14 +1101,15 @@ function heuristicProposal(
   };
 }
 
-async function askModel(
+export async function askModel(
   system: string,
   history: { role: "user" | "assistant"; content: string }[],
   message: string,
 ): Promise<string | null> {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) return null;
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
+  const base = (process.env.XAI_BASE_URL || "https://api.x.ai").replace(/\/+$/, "");
+  const res = await fetch(`${base}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

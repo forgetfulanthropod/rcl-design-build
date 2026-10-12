@@ -21,12 +21,14 @@ export const ACTIONS = [
   "crew.inviteAdmin",
   "foreman.use",
   "code.approve",
+  "report.write", // write my own daily report
+  "report.review", // browse everyone's reports + AI attention summary
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
 const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
-const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn"]);
+const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn", "report.write"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
   superadmin: ALL,
@@ -44,6 +46,7 @@ const MATRIX: Record<Role, Set<Action>> = {
     "workorder.update",
     "workorder.updateOwn",
     "crew.view",
+    "report.write",
   ]),
   labor: FIELD,
   sub: FIELD,
@@ -73,25 +76,16 @@ export function invitableRoles(role: string): Role[] {
   return base;
 }
 
-export type NavId = "desk" | "jobs" | "field" | "comms" | "foreman" | "crew";
+export type NavId = "today" | "mine" | "reports" | "attention";
 
-/** Bottom nav per role. Never more than 5 tabs. */
+/**
+ * The app is slimmed to daily reports. Principals (report.review) review; everyone else writes.
+ * The older desk views (jobs, dispatch, RFIs, change orders, milestones, Foreman) are hidden from nav.
+ */
 export function navFor(role: string): NavId[] {
-  const r = normalizeRole(role);
-  switch (r) {
-    case "superadmin":
-      return ["desk", "jobs", "field", "crew", "foreman"];
-    case "owner":
-    case "admin":
-      return ["desk", "jobs", "field", "crew", "comms"];
-    case "lead":
-      return ["desk", "field", "jobs", "crew"];
-    case "labor":
-    case "sub":
-      return ["desk", "field", "comms"];
-    default:
-      return ["desk"];
-  }
+  if (can(role, "report.review")) return ["reports", "attention"];
+  if (can(role, "report.write")) return ["today", "mine"];
+  return [];
 }
 
 type Moneyed = {
