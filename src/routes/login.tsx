@@ -140,8 +140,8 @@ function Login() {
               </>
             ) : (
               <p className="text-sm text-fg">
-                Check your email. We sent a single-use sign-in link to {sent.destination}. It expires in
-                30 minutes.
+                {sent.channel === "email" ? "Check your email." : "Check your texts."} We sent a single-use
+                sign-in link to {sent.destination}. It expires in 30 minutes.
               </p>
             )}
           </div>

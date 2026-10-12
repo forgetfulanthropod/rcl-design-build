@@ -2,6 +2,7 @@
 // Env: RESEND_API_KEY (secret), MAIL_FROM (e.g. "RCL <login@example.com>"), APP_ORIGIN (e.g. "https://rcl.grok.me").
 // Never log message bodies or the API key.
 import type { Sql } from "@/lib/db";
+import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
 
 export type SendResult = { ok: true; id: string | null } | { ok: false; error: string };
 
@@ -66,7 +67,7 @@ export async function sendEmail(input: {
   }
 }
 
-/** Sends an outbound_messages row by email and records status (sent / failed / skipped). */
+/** Sends an outbound_messages row by email or SMS and records status (sent / failed / skipped). */
 export async function deliverOutbound(
   sql: Sql,
   row: { id: string; channel: string; to: string; subject: string; body: string },
@@ -74,9 +75,19 @@ export async function deliverOutbound(
   let status: string;
   let providerId: string | null = null;
   let error: string | null = null;
-  if (row.channel !== "email") {
+  if (row.channel === "sms") {
+    if (!isSmsConfigured()) {
+      status = "skipped";
+      error = "SMS not configured";
+    } else {
+      const result = await sendSms({ to: row.to, body: row.body });
+      status = result.ok ? "sent" : "failed";
+      providerId = result.ok ? result.id : null;
+      error = result.ok ? null : result.error;
+    }
+  } else if (row.channel !== "email") {
     status = "skipped";
-    error = "No SMS provider configured";
+    error = `Unknown channel ${row.channel}`;
   } else if (!isMailerConfigured()) {
     status = "skipped";
     error = "Mailer not configured";

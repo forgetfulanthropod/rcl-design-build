@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { validateSource } from "@/lib/product";
 import { absoluteUrl, isMailerConfigured, sendEmail } from "@/lib/server/mailer.server";
+import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
 
 const SMS_DOMAIN = "crew.rcl.build";
 const ROLES = new Set(["admin", "pm", "superintendent", "field", "office"]);
@@ -19,6 +20,7 @@ export function normalizePhone(raw: string): string | null {
   return `+${digits}`;
 }
 
+/** Account key for phone-only users. Identity only: texts go to the E.164 number, never here. */
 export function phoneToEmail(phone: string): string {
   return `sms.${phone.replace(/\D/g, "")}@${SMS_DOMAIN}`;
 }
@@ -144,10 +146,21 @@ export async function requestLoginLink(input: {
     if (!result.ok) return { ok: false, error: "We could not send the email. Try again in a minute." };
     return { ok: true, emailed: true, channel: input.channel, destination };
   }
-  if (process.env.NODE_ENV === "production" && input.channel === "email") {
-    return { ok: false, error: "Email sign-in is not configured yet." };
+  if (input.channel === "sms" && isSmsConfigured()) {
+    const result = await sendSms({
+      to: destination,
+      body: `RCL Design-Build sign-in link (single-use, expires in 30 min): ${absoluteUrl(previewPath)}`,
+    });
+    if (!result.ok) return { ok: false, error: "We could not send the text. Try again in a minute." };
+    return { ok: true, emailed: false, channel: input.channel, destination };
   }
-  // Dev fallback (or SMS, which has no carrier yet): show the link on screen.
+  if (process.env.NODE_ENV === "production") {
+    return {
+      ok: false,
+      error: input.channel === "email" ? "Email sign-in is not configured yet." : "Text sign-in is not configured yet.",
+    };
+  }
+  // Dev fallback when the provider is not configured: show the link on screen.
   return { ok: true, emailed: false, previewPath, channel: input.channel, destination };
 }
 
