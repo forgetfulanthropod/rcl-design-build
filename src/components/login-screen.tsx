@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate } from "@tanstack/react-router";
 import { authClient, GROK_PROVIDERS, signIn } from "@/lib/auth/client";
 import { useCurrentUserState } from "@/lib/auth/use-current-user";
-import { debugSignIn, getDebugLogin, requestMagicLink } from "@/lib/server/fns";
+import { debugSignIn, getDebugLogin, requestMagicLink, resetDemoData } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button } from "@/components/ui";
 
@@ -216,7 +216,10 @@ function DebugRoles() {
   return (
     <div className="mt-6 rounded-md border border-dashed border-copper/60 p-3" data-testid="debug-login">
       <p className="text-xs font-medium uppercase tracking-widest text-copper">Debug sign-in</p>
-      <p className="mt-1 text-xs text-muted">Demo company only. Anyone can use this while it is on.</p>
+      <p className="mt-1 text-sm text-muted">
+        Signs in to a separate demo company with fake data. Changes there are real and saved. Anyone can use this
+        while it is on.
+      </p>
       <div className="mt-3 grid grid-cols-2 gap-2">
         {roles.map((role) => (
           <button
@@ -239,7 +242,23 @@ function DebugRoles() {
           </button>
         ))}
       </div>
-      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+      <button
+        type="button"
+        disabled={Boolean(busy)}
+        className="mt-3 h-11 w-full rounded-md text-sm text-muted underline"
+        onClick={() => {
+          if (!window.confirm("Reset the demo company? All demo changes are erased and fresh demo data is loaded.")) return;
+          setBusy("reset");
+          setError("");
+          resetDemoData()
+            .then(() => setError("Demo data reset."))
+            .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not reset."))
+            .finally(() => setBusy(""));
+        }}
+      >
+        {busy === "reset" ? "Resetting…" : "Reset demo data"}
+      </button>
+      {error ? <p className="mt-2 text-sm text-muted" role="status">{error}</p> : null}
     </div>
   );
 }

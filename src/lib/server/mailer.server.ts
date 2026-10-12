@@ -3,6 +3,7 @@
 // Never log message bodies or the API key.
 import type { Sql } from "@/lib/db";
 import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
+import { DEMO_COMPANY_ID } from "@/lib/demo";
 
 export type SendResult = { ok: true; id: string | null } | { ok: false; error: string };
 
@@ -75,7 +76,12 @@ export async function deliverOutbound(
   let status: string;
   let providerId: string | null = null;
   let error: string | null = null;
-  if (row.channel === "sms") {
+  const owner = await sql<{ company_id: string }>`select company_id from outbound_messages where id = ${row.id}`;
+  if (owner[0]?.company_id === DEMO_COMPANY_ID) {
+    // The debug demo company never sends real email or texts.
+    status = "skipped";
+    error = "Demo company";
+  } else if (row.channel === "sms") {
     if (!isSmsConfigured()) {
       status = "skipped";
       error = "SMS not configured";

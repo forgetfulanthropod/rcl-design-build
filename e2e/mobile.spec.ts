@@ -57,13 +57,13 @@ for (const vp of VIEWPORTS) {
     // Loading state: delay the first desk load so the placeholder is captured.
     await ep.route("**/_serverFn/**", async (route) => {
       await new Promise((r) => setTimeout(r, 1500));
-      await route.continue();
+      await route.continue().catch(() => undefined);
     });
     await ep.goto(link);
     await ep.waitForURL((u) => !u.pathname.startsWith("/m/"), { timeout: 30_000 });
     await ep.waitForTimeout(300);
     await ep.screenshot({ path: `${OUT}/${tag}-02-loading.png` });
-    await ep.unroute("**/_serverFn/**");
+    await ep.unrouteAll({ behavior: "ignoreErrors" });
     await expect(ep.getByRole("button", { name: "Site" }).first()).toBeVisible();
 
     await ep.screenshot({ path: `${OUT}/${tag}-03-desk.png`, fullPage: true });
