@@ -47,7 +47,9 @@ for (const [role, name] of ROLES) {
     await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
     await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
     await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(name).first()).toBeVisible();
+    // Name is hidden below sm so the header title keeps room; avatar initial + Sign out stay visible.
+    await expect(page.getByText(name).first()).toBeAttached();
+    await expect(page.locator("header span.rounded-full").first()).toBeVisible();
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/390x844-${role}.png`, fullPage: true });
     await ctx.close();

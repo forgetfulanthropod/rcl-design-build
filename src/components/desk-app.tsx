@@ -151,9 +151,10 @@ export function DeskApp() {
               <button
                 type="button"
                 onClick={() => setView("team")}
+                aria-label="Team"
                 className={`inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "team" ? "text-copper" : "text-muted"}`}
               >
-                <Users className="size-4" aria-hidden="true" /> Team
+                <Users className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Team</span>
               </button>
             ) : null}
             {canSettings ? (
