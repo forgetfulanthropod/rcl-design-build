@@ -16,7 +16,8 @@ async function as(browser: Browser, role: string, viewport = PHONE) {
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
   await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
+  // Phones show an account menu button (Sign out lives inside it); md+ shows Sign out inline.
+  await expect(page.getByRole("button", { name: /^(Sign out|Account: )/ }).locator("visible=true").first()).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
 
