@@ -15,7 +15,7 @@ async function as(browser: Browser, role: string, viewport = PHONE) {
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login", { timeout: 30_000 }); // "/" now redirects to the role's first view (F1)
   await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
@@ -244,4 +244,141 @@ test("attention: AI summary lists items with citations, is cached, and links to 
   await expect(desk.page.getByText(/^Read 1\d reports/)).toBeVisible({ timeout: 30_000 });
   await desk.page.screenshot({ path: `${OUT}/desktop-owner-attention.png`, fullPage: false });
   await desk.ctx.close();
+});
+
+// ---- Spec 05 · F1: deep links. Every view has a URL; reload, back/forward and links work. ----
+const ALL_VIEWS = ["/today", "/mine", "/reports", "/attention", "/activities", "/safety", "/docs", "/team"] as const;
+const DESK: Record<string, { views: string[]; home: string }> = {
+  owner: { views: ["/reports", "/attention", "/activities", "/docs", "/safety", "/team"], home: "/reports" },
+  admin: { views: ["/reports", "/attention", "/activities", "/docs", "/safety", "/team"], home: "/reports" },
+  lead: { views: ["/today", "/mine", "/activities", "/docs", "/safety"], home: "/today" },
+  labor: { views: ["/today", "/mine", "/activities", "/docs", "/safety"], home: "/today" },
+  subcontractor: { views: ["/today", "/mine", "/docs"], home: "/today" },
+};
+const TITLE: Record<string, string> = {
+  "/today": "Today",
+  "/mine": "My reports",
+  "/reports": "Reports",
+  "/attention": "Attention",
+  "/activities": "Activities",
+  "/safety": "Safety",
+  "/docs": "Docs",
+  "/team": "Team",
+};
+
+for (const role of Object.keys(DESK)) {
+  test(`F1 (${role}): each route opens directly; others redirect home with a notice`, async ({ browser }) => {
+    const { ctx, page } = await as(browser, role, DESKTOP);
+    const { views, home } = DESK[role];
+    await expect(page).toHaveURL((u) => u.pathname === home); // "/" → the role's first view
+    for (const path of ALL_VIEWS) {
+      await page.goto(path);
+      if (views.includes(path)) {
+        await expect(page).toHaveURL((u) => u.pathname === path);
+        await expect(page).toHaveTitle(`${TITLE[path]} · RCL`);
+        await expect(page.getByTestId("desk-notice")).toHaveCount(0);
+      } else {
+        await expect(page).toHaveURL((u) => u.pathname === home);
+        await expect(page.getByTestId("desk-notice")).toHaveText("That page isn't on your desk.");
+      }
+    }
+    await ctx.close();
+  });
+}
+
+test("F1 (lead): each nav click changes the URL and marks the current tab; back/forward work", async ({ browser }) => {
+  const { ctx, page } = await as(browser, "lead", DESKTOP);
+  for (const [label, path] of [["My reports", "/mine"], ["Activities", "/activities"], ["Docs", "/docs"], ["Safety", "/safety"], ["Today", "/today"]]) {
+    await nav(page, label).click();
+    await expect(page).toHaveURL((u) => u.pathname === path);
+    await expect(nav(page, label)).toHaveAttribute("aria-current", "page");
+  }
+  await page.goBack();
+  await expect(page).toHaveURL((u) => u.pathname === "/safety");
+  await expect(page.getByText("2. Daily job safety analysis")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL((u) => u.pathname === "/docs");
+  await page.goForward();
+  await expect(page).toHaveURL((u) => u.pathname === "/safety");
+  await ctx.close();
+});
+
+test("F1 (owner): report filters live in the URL and survive reload", async ({ browser }) => {
+  const { ctx, page } = await as(browser, "owner", DESKTOP);
+  await page.goto("/reports?from=2026-01-05&to=2026-01-09");
+  await expect(page.locator("#rv-from")).toHaveValue("2026-01-05");
+  await page.locator("#rv-to").fill("2026-01-12");
+  await expect(page).toHaveURL((u) => u.searchParams.get("to") === "2026-01-12");
+  await page.reload();
+  await expect(page.locator("#rv-from")).toHaveValue("2026-01-05");
+  await expect(page.locator("#rv-to")).toHaveValue("2026-01-12");
+  await ctx.close();
+});
+
+test("F1 (owner): /docs/<id> opens the document directly, with its title, and survives reload", async ({ browser }) => {
+  const { ctx, page } = await as(browser, "owner", DESKTOP);
+  await page.goto("/docs?section=changes");
+  await page.getByTestId("documents").locator("li button").first().click();
+  await expect(page).toHaveURL((u) => /^\/docs\/[^/]+$/.test(u.pathname));
+  const url = page.url();
+  await expect(page).toHaveTitle(/ · Docs · RCL$/);
+  await page.reload();
+  await expect(page).toHaveURL(url);
+  await expect(page.getByTestId("doc-missing")).toHaveCount(0);
+  await expect(page).toHaveTitle(/ · Docs · RCL$/);
+  await page.goBack();
+  await expect(page).toHaveURL((u) => u.pathname === "/docs" && u.searchParams.get("section") === "changes");
+  await ctx.close();
+});
+
+test("F1: a signed-out deep link goes through sign-in and lands on it; another company's doc is Not found", async ({ browser }) => {
+  const owner = await as(browser, "owner", DESKTOP);
+  await owner.page.goto("/docs?section=changes");
+  await owner.page.getByTestId("documents").locator("li button").first().click();
+  await expect(owner.page).toHaveURL((u) => /^\/docs\/[^/]+$/.test(u.pathname));
+  const docPath = new URL(owner.page.url()).pathname;
+  await owner.ctx.close();
+
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  const page = await ctx.newPage();
+  await page.goto(docPath);
+  await expect(page).toHaveURL((u) => u.pathname === "/login" && u.searchParams.get("next") === docPath);
+  const id = Math.random().toString(36).slice(2, 8);
+  await page.getByRole("button", { name: "Email", exact: true }).click();
+  await page.locator("#who").fill(`Admin ${id}`);
+  await page.locator("#dest").fill(`admin-${id}@example.test`);
+  await page.getByRole("button", { name: /Email me a link/ }).click();
+  await page.getByRole("link", { name: "Open the magic link" }).click();
+  await page.waitForURL((u) => u.pathname === docPath, { timeout: 30_000 });
+  await page.locator("#setup-co").fill(`Co ${id}`);
+  await page.getByRole("button", { name: "Create the desk" }).click();
+  // A new company: the demo company's document isn't on this desk, and nothing about it leaks.
+  await expect(page.getByTestId("doc-missing")).toBeVisible();
+  await expect(page.getByTestId("doc-missing")).toContainText("Not found");
+  await expect(page).toHaveURL((u) => u.pathname === docPath);
+  await ctx.close();
+});
+
+test("F1 (owner): a single report has its own URL; another company gets Not found", async ({ browser }) => {
+  const { ctx, page } = await as(browser, "owner", DESKTOP);
+  const reportId = await page.evaluate(async () => {
+    const mod = await import("/src/lib/server/fns.ts");
+    const today = new Date();
+    const day = (d: Date) => d.toLocaleDateString("en-CA");
+    const from = new Date(today);
+    from.setDate(from.getDate() - 14);
+    const list = await mod.reviewReports({ data: { from: day(from), to: day(today), projectId: "", personId: "" } });
+    return list.reports[0]?.id ?? "";
+  });
+  expect(reportId).not.toBe("");
+  await page.goto(`/reports/${reportId}`);
+  await expect(page.getByTestId("report-missing")).toHaveCount(0);
+  await expect(page).toHaveTitle(/report, .* · Reports · RCL$/);
+  await ctx.close();
+
+  const { newAdmin } = await import("./helpers");
+  const other = await newAdmin(browser, { viewport: DESKTOP });
+  await other.page.goto(`/reports/${reportId}`);
+  await expect(other.page.getByTestId("report-missing")).toContainText("Not found");
+  await other.context.close();
 });

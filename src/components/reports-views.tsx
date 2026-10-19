@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getAttention, listMyReports, reviewReports } from "@/lib/server/fns";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { ReportCard } from "@/components/report-card";
@@ -33,12 +33,33 @@ export function MyReports() {
 
 type Review = Awaited<ReturnType<typeof reviewReports>>;
 
-export function ReportsReview({ focus = "", initialDay = "" }: { focus?: string; initialDay?: string }) {
+export type ReportFilters = { from: string; to: string; job: string; person: string };
+
+export function ReportsReview({
+  focus = "",
+  initialDay = "",
+  initial,
+  onFilters,
+}: {
+  focus?: string;
+  initialDay?: string;
+  /** Filters from the URL (spec 05 · F1). */
+  initial?: Partial<ReportFilters>;
+  onFilters?: (filters: ReportFilters) => void;
+}) {
   const today = localDay();
-  const [from, setFrom] = useState(initialDay || today);
-  const [to, setTo] = useState(initialDay || today);
-  const [projectId, setProjectId] = useState("");
-  const [personId, setPersonId] = useState("");
+  const [from, setFrom] = useState(initial?.from || initialDay || today);
+  const [to, setTo] = useState(initial?.to || initialDay || today);
+  const [projectId, setProjectId] = useState(initial?.job ?? "");
+  const [personId, setPersonId] = useState(initial?.person ?? "");
+  const filtersInitial = useRef(JSON.stringify({ from, to, job: projectId, person: personId }));
+  useEffect(() => {
+    // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
+    if (JSON.stringify({ from, to, job: projectId, person: personId }) === filtersInitial.current) return;
+    filtersInitial.current = "";
+    onFilters?.({ from, to, job: projectId, person: personId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, projectId, personId]);
   const [data, setData] = useState<Review | null>(null);
   const [error, setError] = useState("");
   const [moreFilters, setMoreFilters] = useState(false);
@@ -152,10 +173,27 @@ const CAT_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-export function AttentionView({ openReport }: { openReport: (reportId: string, day: string) => void }) {
+export function AttentionView({
+  openReport,
+  initial,
+  onRange,
+}: {
+  openReport: (reportId: string, day: string) => void;
+  /** Range from the URL (spec 05 · F1). */
+  initial?: { from?: string; to?: string };
+  onRange?: (range: { from: string; to: string }) => void;
+}) {
   const today = localDay();
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
+  const [from, setFrom] = useState(initial?.from || today);
+  const [to, setTo] = useState(initial?.to || today);
+  const rangeInitial = useRef(JSON.stringify({ from, to }));
+  useEffect(() => {
+    // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
+    if (JSON.stringify({ from, to }) === rangeInitial.current) return;
+    rangeInitial.current = "";
+    onRange?.({ from, to });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
   const [data, setData] = useState<Attention | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

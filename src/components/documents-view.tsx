@@ -7,7 +7,7 @@ type Board = Awaited<ReturnType<typeof listDocuments>>;
 type Card = Board["documents"][number];
 
 /** Short list that sits beside the activity board. Full editing stays on Docs. */
-export function DocumentRail({ onOpen }: { onOpen: () => void }) {
+export function DocumentRail({ onOpen }: { onOpen: (docId?: string) => void }) {
   const [board, setBoard] = useState<Board | null>(null);
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export function DocumentRail({ onOpen }: { onOpen: () => void }) {
     <aside className="grid content-start gap-2 rounded-md border border-line bg-surface p-4" data-testid="doc-rail" aria-label="Documents">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg text-fg">Documents</h2>
-        <button type="button" onClick={onOpen} className="h-11 px-2 text-sm text-copper">
+        <button type="button" onClick={() => onOpen()} className="h-11 px-2 text-sm text-copper">
           Manage
         </button>
       </div>
@@ -40,7 +40,7 @@ export function DocumentRail({ onOpen }: { onOpen: () => void }) {
         <ul className="grid gap-2">
           {board.documents.slice(0, 8).map((doc) => (
             <li key={doc.id}>
-              <button type="button" onClick={onOpen} className="w-full text-left">
+              <button type="button" onClick={() => onOpen(doc.id)} className="w-full text-left">
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="text-sm text-fg">{sectionFor(doc.kind).label}</span>
                   <span className="text-sm text-copper">{doc.status}</span>
@@ -55,12 +55,32 @@ export function DocumentRail({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-export function DocumentsView() {
+/**
+ * Docs. With routing (spec 05 · F1) the section and the open document live in the URL:
+ * pass `section`/`docId` from the route and get `onSection`/`onOpenDoc` back.
+ */
+export function DocumentsView({
+  section: sectionParam,
+  onSection,
+  docId,
+  onOpenDoc,
+  onTitle,
+}: {
+  section?: DocSectionId;
+  onSection?: (section: DocSectionId) => void;
+  docId?: string;
+  onOpenDoc?: (docId: string) => void;
+  onTitle?: (title: string) => void;
+} = {}) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [section, setSection] = useState<DocSectionId>("policy");
-  const [openId, setOpenId] = useState("");
+  const [sectionState, setSectionState] = useState<DocSectionId>(sectionParam ?? "policy");
+  const section = sectionParam ?? sectionState;
+  const setSection = (next: DocSectionId) => (onSection ? onSection(next) : setSectionState(next));
+  const [openState, setOpenState] = useState("");
+  const openId = docId ?? openState;
+  const setOpenId = (next: string) => (onOpenDoc ? onOpenDoc(next) : setOpenState(next));
   const [kind, setKind] = useState<DocKind>("rfi");
   const [projectId, setProjectId] = useState("");
   const [title, setTitle] = useState("");
@@ -117,6 +137,13 @@ export function DocumentsView() {
   });
   const createKind: DocKind = creatable.includes(kind) ? kind : (creatable[0] ?? "rfi");
   const current = board?.documents.find((doc) => doc.id === openId) ?? null;
+  const currentTitle = current ? `${DOC_LABEL[current.kind]} ${documentNumber(current.number)}` : "";
+  useEffect(() => {
+    onTitle?.(currentTitle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTitle]);
+  // A link to a document this desk can't see (another company, or gone): say so, leak nothing.
+  const missing = Boolean(board && openId && !current);
   const thread = board?.messages.filter((message) => message.documentId === openId) ?? [];
 
   return (
@@ -124,6 +151,13 @@ export function DocumentsView() {
       {error ? <ErrorBanner message={error} /> : null}
       {!board ? (
         <Skeleton lines={4} label="Loading documents" />
+      ) : missing ? (
+        <div className="grid gap-3" data-testid="doc-missing">
+          <EmptyState title="Not found" body="This document isn't on your desk." />
+          <Button type="button" tone="ghost" onClick={() => setOpenId("")}>
+            Back to Docs
+          </Button>
+        </div>
       ) : current ? (
         <DocumentDetail
           doc={current}

@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { DEMO_COMPANY_ID } from "@/lib/demo";
+import { safeNext } from "@/lib/desk-routes";
 import { COPY_PATH, COPY_SOURCE, WORKFLOW_PATH, WORKFLOW_SOURCE } from "@/lib/product";
 import { insertMagicLink } from "@/lib/server/magic.server";
 import { DEMO_PHOTOS } from "@/lib/server/demo-photos";
@@ -278,7 +279,7 @@ export async function resetDemoCompany(): Promise<void> {
 }
 
 /** Returns a single-use magic-link path that signs in as the demo persona. */
-export async function debugSignIn(role: string): Promise<{ path: string }> {
+export async function debugSignIn(role: string, next?: string): Promise<{ path: string }> {
   if (!debugLoginEnabled()) throw new Error("Debug sign-in is turned off.");
   if (!(DEBUG_ROLES as readonly string[]).includes(role)) throw new Error("Unknown debug role.");
   await ensureDemoCompany();
@@ -292,7 +293,7 @@ export async function debugSignIn(role: string): Promise<{ path: string }> {
     role: who.role,
     action: null,
     proposalId: null,
-    redirectPath: "/",
+    redirectPath: safeNext(next),
     minutes: 5,
   });
   return { path };

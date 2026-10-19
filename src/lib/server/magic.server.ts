@@ -5,6 +5,7 @@ import { absoluteUrl, isMailerConfigured, linkPreviewAllowed, sendEmail } from "
 import { isSmsConfigured, sendSms } from "@/lib/server/sms.server";
 import { normalizeRole } from "@/lib/roles";
 import { canReplayConsumedLink, safeRedirect } from "@/lib/sign-in-complete";
+import { safeNext } from "@/lib/desk-routes";
 
 const SMS_DOMAIN = "crew.rcl.build";
 
@@ -82,6 +83,8 @@ export async function requestLoginLink(input: {
   channel: "email" | "sms";
   destination: string;
   name: string;
+  /** Deep link to land on after sign-in (spec 05 · F1). Same-origin paths only. */
+  next?: string;
 }): Promise<
   | {
       ok: true;
@@ -126,7 +129,7 @@ export async function requestLoginLink(input: {
     role: null,
     action: null,
     proposalId: null,
-    redirectPath: "/",
+    redirectPath: safeNext(input.next),
     minutes: 30,
   });
   if (input.channel === "email" && isMailerConfigured()) {

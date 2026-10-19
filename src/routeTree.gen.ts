@@ -9,21 +9,66 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as DeskRouteImport } from './routes/_desk'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as DeskIndexRouteImport } from './routes/_desk.index'
+import { Route as DeskActivitiesRouteImport } from './routes/_desk.activities'
+import { Route as DeskAttentionRouteImport } from './routes/_desk.attention'
+import { Route as DeskMineRouteImport } from './routes/_desk.mine'
+import { Route as DeskSafetyRouteImport } from './routes/_desk.safety'
+import { Route as DeskTeamRouteImport } from './routes/_desk.team'
+import { Route as DeskTodayRouteImport } from './routes/_desk.today'
 import { Route as MTokenRouteImport } from './routes/m.$token'
 import { Route as StageTokenRouteImport } from './routes/stage.$token'
+import { Route as DeskDocsIndexRouteImport } from './routes/_desk.docs.index'
+import { Route as DeskDocsDocIdRouteImport } from './routes/_desk.docs.$docId'
+import { Route as DeskReportsIndexRouteImport } from './routes/_desk.reports.index'
+import { Route as DeskReportsReportIdRouteImport } from './routes/_desk.reports.$reportId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const DeskRoute = DeskRouteImport.update({
+  id: '/_desk',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => rootRouteImport,
+} as any)
+const DeskIndexRoute = DeskIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskActivitiesRoute = DeskActivitiesRouteImport.update({
+  id: '/activities',
+  path: '/activities',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskAttentionRoute = DeskAttentionRouteImport.update({
+  id: '/attention',
+  path: '/attention',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskMineRoute = DeskMineRouteImport.update({
+  id: '/mine',
+  path: '/mine',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskSafetyRoute = DeskSafetyRouteImport.update({
+  id: '/safety',
+  path: '/safety',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskTeamRoute = DeskTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskTodayRoute = DeskTodayRouteImport.update({
+  id: '/today',
+  path: '/today',
+  getParentRoute: () => DeskRoute,
 } as any)
 const MTokenRoute = MTokenRouteImport.update({
   id: '/m/$token',
@@ -35,6 +80,26 @@ const StageTokenRoute = StageTokenRouteImport.update({
   path: '/stage/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeskDocsIndexRoute = DeskDocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskDocsDocIdRoute = DeskDocsDocIdRouteImport.update({
+  id: '/docs/$docId',
+  path: '/docs/$docId',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskReportsIndexRoute = DeskReportsIndexRouteImport.update({
+  id: '/reports/',
+  path: '/reports/',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskReportsReportIdRoute = DeskReportsReportIdRouteImport.update({
+  id: '/reports/$reportId',
+  path: '/reports/$reportId',
+  getParentRoute: () => DeskRoute,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -42,38 +107,115 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof DeskIndexRoute
   '/login': typeof LoginRoute
+  '/activities': typeof DeskActivitiesRoute
+  '/attention': typeof DeskAttentionRoute
+  '/mine': typeof DeskMineRoute
+  '/safety': typeof DeskSafetyRoute
+  '/team': typeof DeskTeamRoute
+  '/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
   '/stage/$token': typeof StageTokenRoute
+  '/docs/$docId': typeof DeskDocsDocIdRoute
+  '/reports/$reportId': typeof DeskReportsReportIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/docs/': typeof DeskDocsIndexRoute
+  '/reports/': typeof DeskReportsIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/activities': typeof DeskActivitiesRoute
+  '/attention': typeof DeskAttentionRoute
+  '/mine': typeof DeskMineRoute
+  '/safety': typeof DeskSafetyRoute
+  '/team': typeof DeskTeamRoute
+  '/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
   '/stage/$token': typeof StageTokenRoute
+  '/': typeof DeskIndexRoute
+  '/docs/$docId': typeof DeskDocsDocIdRoute
+  '/reports/$reportId': typeof DeskReportsReportIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/docs': typeof DeskDocsIndexRoute
+  '/reports': typeof DeskReportsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_desk': typeof DeskRouteWithChildren
   '/login': typeof LoginRoute
+  '/_desk/activities': typeof DeskActivitiesRoute
+  '/_desk/attention': typeof DeskAttentionRoute
+  '/_desk/mine': typeof DeskMineRoute
+  '/_desk/safety': typeof DeskSafetyRoute
+  '/_desk/team': typeof DeskTeamRoute
+  '/_desk/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
   '/stage/$token': typeof StageTokenRoute
+  '/_desk/': typeof DeskIndexRoute
+  '/_desk/docs/$docId': typeof DeskDocsDocIdRoute
+  '/_desk/reports/$reportId': typeof DeskReportsReportIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/_desk/docs/': typeof DeskDocsIndexRoute
+  '/_desk/reports/': typeof DeskReportsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/m/$token' | '/stage/$token' | '/api/auth/$'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/activities'
+    | '/attention'
+    | '/mine'
+    | '/safety'
+    | '/team'
+    | '/today'
+    | '/m/$token'
+    | '/stage/$token'
+    | '/docs/$docId'
+    | '/reports/$reportId'
+    | '/api/auth/$'
+    | '/docs/'
+    | '/reports/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/m/$token' | '/stage/$token' | '/api/auth/$'
+  to:
+    | '/login'
+    | '/activities'
+    | '/attention'
+    | '/mine'
+    | '/safety'
+    | '/team'
+    | '/today'
+    | '/m/$token'
+    | '/stage/$token'
+    | '/'
+    | '/docs/$docId'
+    | '/reports/$reportId'
+    | '/api/auth/$'
+    | '/docs'
+    | '/reports'
   id:
-    '__root__' | '/' | '/login' | '/m/$token' | '/stage/$token' | '/api/auth/$'
+    | '__root__'
+    | '/_desk'
+    | '/login'
+    | '/_desk/activities'
+    | '/_desk/attention'
+    | '/_desk/mine'
+    | '/_desk/safety'
+    | '/_desk/team'
+    | '/_desk/today'
+    | '/m/$token'
+    | '/stage/$token'
+    | '/_desk/'
+    | '/_desk/docs/$docId'
+    | '/_desk/reports/$reportId'
+    | '/api/auth/$'
+    | '/_desk/docs/'
+    | '/_desk/reports/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  DeskRoute: typeof DeskRouteWithChildren
   LoginRoute: typeof LoginRoute
   MTokenRoute: typeof MTokenRoute
   StageTokenRoute: typeof StageTokenRoute
@@ -82,11 +224,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
+    '/_desk': {
+      id: '/_desk'
+      path: ''
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof DeskRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -95,6 +237,55 @@ declare module '@tanstack/react-router' {
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_desk/': {
+      id: '/_desk/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof DeskIndexRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/activities': {
+      id: '/_desk/activities'
+      path: '/activities'
+      fullPath: '/activities'
+      preLoaderRoute: typeof DeskActivitiesRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/attention': {
+      id: '/_desk/attention'
+      path: '/attention'
+      fullPath: '/attention'
+      preLoaderRoute: typeof DeskAttentionRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/mine': {
+      id: '/_desk/mine'
+      path: '/mine'
+      fullPath: '/mine'
+      preLoaderRoute: typeof DeskMineRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/safety': {
+      id: '/_desk/safety'
+      path: '/safety'
+      fullPath: '/safety'
+      preLoaderRoute: typeof DeskSafetyRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/team': {
+      id: '/_desk/team'
+      path: '/team'
+      fullPath: '/team'
+      preLoaderRoute: typeof DeskTeamRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/today': {
+      id: '/_desk/today'
+      path: '/today'
+      fullPath: '/today'
+      preLoaderRoute: typeof DeskTodayRouteImport
+      parentRoute: typeof DeskRoute
     }
     '/m/$token': {
       id: '/m/$token'
@@ -110,6 +301,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StageTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_desk/docs/': {
+      id: '/_desk/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DeskDocsIndexRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/docs/$docId': {
+      id: '/_desk/docs/$docId'
+      path: '/docs/$docId'
+      fullPath: '/docs/$docId'
+      preLoaderRoute: typeof DeskDocsDocIdRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/reports/': {
+      id: '/_desk/reports/'
+      path: '/reports'
+      fullPath: '/reports/'
+      preLoaderRoute: typeof DeskReportsIndexRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/reports/$reportId': {
+      id: '/_desk/reports/$reportId'
+      path: '/reports/$reportId'
+      fullPath: '/reports/$reportId'
+      preLoaderRoute: typeof DeskReportsReportIdRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -120,8 +339,38 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface DeskRouteChildren {
+  DeskActivitiesRoute: typeof DeskActivitiesRoute
+  DeskAttentionRoute: typeof DeskAttentionRoute
+  DeskMineRoute: typeof DeskMineRoute
+  DeskSafetyRoute: typeof DeskSafetyRoute
+  DeskTeamRoute: typeof DeskTeamRoute
+  DeskTodayRoute: typeof DeskTodayRoute
+  DeskIndexRoute: typeof DeskIndexRoute
+  DeskDocsDocIdRoute: typeof DeskDocsDocIdRoute
+  DeskReportsReportIdRoute: typeof DeskReportsReportIdRoute
+  DeskDocsIndexRoute: typeof DeskDocsIndexRoute
+  DeskReportsIndexRoute: typeof DeskReportsIndexRoute
+}
+
+const DeskRouteChildren: DeskRouteChildren = {
+  DeskActivitiesRoute: DeskActivitiesRoute,
+  DeskAttentionRoute: DeskAttentionRoute,
+  DeskMineRoute: DeskMineRoute,
+  DeskSafetyRoute: DeskSafetyRoute,
+  DeskTeamRoute: DeskTeamRoute,
+  DeskTodayRoute: DeskTodayRoute,
+  DeskIndexRoute: DeskIndexRoute,
+  DeskDocsDocIdRoute: DeskDocsDocIdRoute,
+  DeskReportsReportIdRoute: DeskReportsReportIdRoute,
+  DeskDocsIndexRoute: DeskDocsIndexRoute,
+  DeskReportsIndexRoute: DeskReportsIndexRoute,
+}
+
+const DeskRouteWithChildren = DeskRoute._addFileChildren(DeskRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  DeskRoute: DeskRouteWithChildren,
   LoginRoute: LoginRoute,
   MTokenRoute: MTokenRoute,
   StageTokenRoute: StageTokenRoute,

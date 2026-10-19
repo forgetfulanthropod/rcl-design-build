@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { DeskContext, type DeskResult } from "@/components/desk-context";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { AlertTriangle, ClipboardList, Files, History, ListChecks, NotebookPen, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, loadDesk } from "@/lib/server/fns";
@@ -6,17 +8,11 @@ import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
-import { CrewView } from "@/components/desk-views";
-import { TodayReport } from "@/components/today-report";
-import { AttentionView, MyReports, ReportsReview } from "@/components/reports-views";
-import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
-import { SafetyView } from "@/components/safety-view";
-import { DocumentsView } from "@/components/documents-view";
 import { can, type NavId } from "@/lib/permissions";
+import { NOT_ON_DESK, VIEW_LABEL, VIEW_PATH, canOpen, defaultPath, pageTitle, viewForPath, type DeskView } from "@/lib/desk-routes";
 import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
 
-type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
-type View = NavId | "team";
+type View = DeskView;
 
 // Slimmed to daily reports. The older desk views (Desk home, Jobs, Site/dispatch board, work orders,
 // RFIs, change orders, milestones, contract values, Log, Foreman) are hidden from navigation; their
@@ -31,13 +27,49 @@ const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
   { id: "docs", label: "Docs", icon: Files },
 ];
 
-export function DeskApp() {
+/**
+ * The desk shell (sidebar, header, bottom nav) around the current route (spec 05 · F1).
+ * The view comes from the URL; a view that isn't on this role's desk redirects to the
+ * role's default with "That page isn't on your desk."
+ */
+export function DeskApp({ children }: { children?: ReactNode }) {
   const [data, setData] = useState<DeskResult | null>(null);
   const [error, setError] = useState("");
-  const [view, setView] = useState<View | "">("");
-  const [focus, setFocus] = useState({ id: "", day: "" });
   const [attempt, setAttempt] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [recordTitle, setRecordTitle] = useState("");
   const online = useOnline();
+  const navigate = useNavigate();
+  // The view comes from the route that is actually rendered (the last match), not the
+  // in-flight location: during a redirect the old route is still on screen for a frame.
+  const pathname = useRouterState({ select: (state) => state.matches[state.matches.length - 1]?.pathname ?? state.location.pathname });
+  const view = viewForPath(pathname);
+  const role = data && !data.needsSetup ? data.profile.role : "";
+  const allowed = Boolean(role && view && canOpen(role, view));
+
+  useEffect(() => {
+    if (!role) return;
+    if (!view) {
+      void navigate({ to: defaultPath(role), replace: true });
+    } else if (!canOpen(role, view)) {
+      setNotice(NOT_ON_DESK);
+      void navigate({ to: defaultPath(role), replace: true });
+    }
+  }, [role, view, navigate]);
+
+  useEffect(() => {
+    setRecordTitle("");
+  }, [pathname]);
+
+  useEffect(() => {
+    if (view && allowed) document.title = pageTitle(view, recordTitle);
+  }, [view, allowed, recordTitle]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,8 +123,9 @@ export function DeskApp() {
     .map((id) => NAV.find((item) => item.id === id))
     .filter((item): item is (typeof NAV)[number] => Boolean(item));
   const canTeam = can(ready.profile.role, "crew.invite");
-  const current: View = view === "team" && canTeam ? "team" : nav.some((item) => item.id === view) ? (view as NavId) : (nav[0]?.id ?? "today");
-  const label = current === "team" ? "Team" : NAV.find((item) => item.id === current)?.label;
+  const current: View | null = allowed ? view : null;
+  const label = current ? VIEW_LABEL[current] : "";
+  const go = (to: View) => void navigate({ to: VIEW_PATH[to] });
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
@@ -106,7 +139,7 @@ export function DeskApp() {
         </div>
         <nav className="mt-6 grid gap-1">
           {nav.map((item) => (
-            <NavButton key={item.id} item={item} active={current === item.id} onClick={() => setView(item.id)} />
+            <NavButton key={item.id} item={item} active={current === item.id} onClick={() => go(item.id)} />
           ))}
         </nav>
       </aside>
@@ -120,7 +153,8 @@ export function DeskApp() {
             {canTeam ? (
               <button
                 type="button"
-                onClick={() => setView("team")}
+                onClick={() => go("team")}
+                aria-current={current === "team" ? "page" : undefined}
                 className={`inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "team" ? "text-copper" : "text-muted"}`}
               >
                 <Users className="size-4" aria-hidden="true" /> Team
@@ -135,28 +169,17 @@ export function DeskApp() {
             <ErrorBanner message={error} onRetry={() => setError("")} />
           </div>
         ) : null}
+        {notice ? (
+          <p role="status" className="mx-4 mt-3 rounded-md bg-raised p-3 text-base text-fg" data-testid="desk-notice">
+            {notice}
+          </p>
+        ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          {current === "today" ? <TodayReport /> : null}
-          {current === "mine" ? <MyReports /> : null}
-          {current === "reports" ? <ReportsReview key={`${focus.id}-${focus.day}`} focus={focus.id} initialDay={focus.day} /> : null}
-          {current === "attention" ? (
-            <AttentionView
-              openReport={(id, day) => {
-                setFocus({ id, day });
-                setView("reports");
-              }}
-            />
-          ) : null}
-          {current === "activities" ? (
-            can(ready.profile.role, "report.review") ? (
-              <ActivityOverview onOpenDocs={() => setView("docs")} />
-            ) : (
-              <ActivitiesView onOpenDocs={() => setView("docs")} />
-            )
-          ) : null}
-          {current === "safety" ? <SafetyView /> : null}
-          {current === "docs" ? <DocumentsView /> : null}
-          {current === "team" ? <CrewView data={ready} commit={commit} /> : null}
+          {current ? (
+            <DeskContext.Provider value={{ ready, commit, setRecordTitle }}>{allowed ? children : null}</DeskContext.Provider>
+          ) : (
+            <Skeleton lines={4} label="Opening the desk" />
+          )}
         </div>
       </div>
       <nav
@@ -168,7 +191,7 @@ export function DeskApp() {
           <button
             key={item.id}
             type="button"
-            onClick={() => setView(item.id)}
+            onClick={() => go(item.id)}
             aria-current={current === item.id ? "page" : undefined}
             className={`flex h-16 flex-col items-center justify-center gap-1 text-[13px] font-medium ${
               current === item.id ? "text-copper" : "text-muted"
@@ -197,6 +220,7 @@ function NavButton({
     <button
       type="button"
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={`flex h-11 items-center gap-2 rounded-md px-2 text-left text-sm ${
         active ? "bg-raised text-fg" : "text-muted hover:text-fg"
       }`}
