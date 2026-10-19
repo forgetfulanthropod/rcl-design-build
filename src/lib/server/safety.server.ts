@@ -1,3 +1,4 @@
+import { requireJob } from "@/lib/current-job";
 import { randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { assertCan, can } from "@/lib/permissions";
@@ -233,6 +234,7 @@ export async function saveJsa(
 ): Promise<SafetyDesk> {
   const opened = await openDesk(userId, input.day);
   assertCan(opened.role, "safety.write");
+  requireJob(input.projectId, false);
   let projectId: string | null = null;
   if (input.projectId) {
     const job = await opened.sql<{ id: string }>`

@@ -1,3 +1,6 @@
+import { JobSelect } from "@/components/job-select";
+import { useCurrentJob } from "@/lib/use-current-job";
+import { docMayBeCompanyWide } from "@/lib/current-job";
 import { useEffect, useState } from "react";
 import { createDocument, fileDocumentReply, listDocuments, sendDocument, setDocumentStatus } from "@/lib/server/fns";
 import { DOC_LABEL, DOC_SECTIONS, DOC_STATUSES, documentNumber, sectionFor, visibleSections, type DocKind, type DocSectionId } from "@/lib/documents";
@@ -62,7 +65,8 @@ export function DocumentsView() {
   const [section, setSection] = useState<DocSectionId>("policy");
   const [openId, setOpenId] = useState("");
   const [kind, setKind] = useState<DocKind>("rfi");
-  const [projectId, setProjectId] = useState("");
+  const job = useCurrentJob();
+  const projectId = job.projectId;
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [who, setWho] = useState("");
@@ -216,13 +220,7 @@ export function DocumentsView() {
               <input id="doc-title" className="field" value={title} onChange={(event) => setTitle(event.target.value)} />
               <label className="text-sm text-muted" htmlFor="doc-body">What it says</label>
               <textarea id="doc-body" className="field min-h-20" value={body} onChange={(event) => setBody(event.target.value)} />
-              <label className="text-sm text-muted" htmlFor="doc-job">Job</label>
-              <select id="doc-job" className="field" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-                <option value="">No job</option>
-                {board.jobs.map((job) => (
-                  <option key={job.id} value={job.id}>{job.name}</option>
-                ))}
-              </select>
+              <JobSelect id="doc-job" jobs={board.jobs} value={projectId} onChange={job.setProjectId} companyWide={docMayBeCompanyWide(createKind)} currentHint={job.isCurrent} />
               <label className="text-sm text-muted" htmlFor="doc-who">Send to</label>
               <input id="doc-who" className="field" placeholder="Name" value={who} onChange={(event) => setWho(event.target.value)} />
               <input className="field" type="email" aria-label="Email" placeholder="name@company.com" value={email} onChange={(event) => setEmail(event.target.value)} />
@@ -232,7 +230,7 @@ export function DocumentsView() {
                   <input id="doc-amount" className="field" inputMode="numeric" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} />
                 </>
               ) : null}
-              <BigButton type="submit" disabled={busy || !title.trim()}>
+              <BigButton type="submit" disabled={busy || !title.trim() || (!projectId && !docMayBeCompanyWide(createKind))}>
                 Add {DOC_LABEL[createKind].toLowerCase()}
               </BigButton>
             </form>

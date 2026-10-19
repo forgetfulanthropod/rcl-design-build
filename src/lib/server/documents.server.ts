@@ -1,3 +1,4 @@
+import { docMayBeCompanyWide, requireJob } from "@/lib/current-job";
 import { randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { DEMO_COMPANY_ID } from "@/lib/demo";
@@ -212,6 +213,7 @@ export async function createDocument(
   if (!can(me.role, "doc.status") && kind !== "rfi") {
     throw new Error("You can open an RFI. Policy and change orders are for a lead.");
   }
+  requireJob(input.projectId, docMayBeCompanyWide(kind));
   if (kind === "invoice" && (input.amount == null || input.amount < 0)) throw new Error("An invoice needs an amount.");
   if (kind === "change_order" && can(me.role, "money.view") && (input.amount == null || input.amount < 0)) {
     throw new Error("A change order needs an amount.");
