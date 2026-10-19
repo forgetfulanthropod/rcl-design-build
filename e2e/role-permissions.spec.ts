@@ -59,16 +59,16 @@ for (const role of ["owner", "admin"] as const) {
     await overview.getByRole("button", { name: "+ Add activity" }).click();
     const add = page.getByTestId("overview-add");
     const title = `Set temp rail on the stairs (${role})`;
-    await add.getByLabel("Activity").fill(title);
-    await add.getByLabel("Detail").fill("Before the inspector walks it.");
-    await add.getByLabel("Job").selectOption({ index: 1 });
+    await add.locator("#ov-add-title").fill(title);
+    await add.locator("#ov-add-detail").fill("Before the inspector walks it.");
+    await add.locator("#ov-add-job").selectOption({ index: 1 });
     await add.getByRole("button", { name: "Add activity" }).click();
     const item = page.getByTestId("overview-activity").filter({ hasText: title });
     await expect(item).toBeVisible();
 
     await item.getByRole("button", { name: `Edit ${title}` }).click();
     const edited = `${title}, both sides`;
-    await item.getByLabel("Activity").fill(edited);
+    await item.getByRole("textbox", { name: "Activity", exact: true }).fill(edited);
     await item.getByRole("button", { name: "Save", exact: true }).click();
     const after = page.getByTestId("overview-activity").filter({ hasText: edited });
     await expect(after).toBeVisible();
