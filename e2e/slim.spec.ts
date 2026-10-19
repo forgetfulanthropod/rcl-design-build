@@ -287,6 +287,33 @@ for (const role of Object.keys(DESK)) {
   });
 }
 
+test("F1 (owner): no nav is clickable on \"/\" before the redirect lands (a click can't be overwritten)", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  // Record, on every DOM change, whether a nav button exists while the path is still "/".
+  await ctx.addInitScript(() => {
+    (window as unknown as { __navAtRoot: boolean }).__navAtRoot = false;
+    const check = () => {
+      if (location.pathname === "/" && document.querySelector("aside nav button, nav[aria-label='Main'] button")) {
+        (window as unknown as { __navAtRoot: boolean }).__navAtRoot = true;
+      }
+    };
+    new MutationObserver(check).observe(document, { childList: true, subtree: true });
+  });
+  const page = await ctx.newPage();
+  await page.goto("/login");
+  await page.getByTestId("debug-login").getByRole("button", { name: LABEL.owner, exact: true }).click();
+  await expect(page).toHaveURL((u) => u.pathname === "/reports", { timeout: 30_000 });
+  await expect(nav(page, "Reports")).toHaveAttribute("aria-current", "page");
+  expect(await page.evaluate(() => (window as unknown as { __navAtRoot: boolean }).__navAtRoot)).toBe(false);
+  // A fresh load of "/" behaves the same.
+  await page.evaluate(() => ((window as unknown as { __navAtRoot: boolean }).__navAtRoot = false));
+  await page.goto("/");
+  await expect(page).toHaveURL((u) => u.pathname === "/reports", { timeout: 30_000 });
+  await expect(nav(page, "Reports")).toHaveAttribute("aria-current", "page");
+  expect(await page.evaluate(() => (window as unknown as { __navAtRoot: boolean }).__navAtRoot)).toBe(false);
+  await ctx.close();
+});
+
 test("F1 (lead): each nav click changes the URL and marks the current tab; back/forward work", async ({ browser }) => {
   const { ctx, page } = await as(browser, "lead", DESKTOP);
   for (const [label, path] of [["My reports", "/mine"], ["Activities", "/activities"], ["Docs", "/docs"], ["Safety", "/safety"], ["Today", "/today"]]) {

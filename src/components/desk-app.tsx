@@ -127,6 +127,17 @@ export function DeskApp({ children }: { children?: ReactNode }) {
   const label = current ? VIEW_LABEL[current] : "";
   const go = (to: View) => void navigate({ to: VIEW_PATH[to] });
 
+  // On "/" (or a page this role can't open) the redirect to the role's first view is still in
+  // flight. Don't render the nav yet: a click there would be overwritten when the redirect lands.
+  if (!current) {
+    return (
+      <main className="mx-auto grid min-h-dvh max-w-lg content-center gap-4 px-5">
+        <OfflineBadge online={online} />
+        <Skeleton lines={4} label="Opening the desk" />
+      </main>
+    );
+  }
+
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
       <aside className="hidden border-r border-line bg-surface md:flex md:flex-col md:px-3 md:py-5">
@@ -175,11 +186,7 @@ export function DeskApp({ children }: { children?: ReactNode }) {
           </p>
         ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          {current ? (
-            <DeskContext.Provider value={{ ready, commit, setRecordTitle }}>{allowed ? children : null}</DeskContext.Provider>
-          ) : (
-            <Skeleton lines={4} label="Opening the desk" />
-          )}
+          <DeskContext.Provider value={{ ready, commit, setRecordTitle }}>{children}</DeskContext.Provider>
         </div>
       </div>
       <nav

@@ -318,7 +318,8 @@ export function DocumentsView({
                       const msg = createdMessage(doc.kind, doc.number);
                       setCreated(msg);
                       // Carry the banner in the URL so /docs/$docId still shows it after F1 navigate.
-                      onOpenDoc ? onOpenDoc(doc.id, { created: msg }) : setOpenId(doc.id);
+                      if (onOpenDoc) onOpenDoc(doc.id, { created: msg });
+                      else setOpenId(doc.id);
                       setEmail(doc.counterpartyEmail);
                     }
                   });

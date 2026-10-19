@@ -242,7 +242,7 @@ export function AttentionView({
       if (!generate) return;
       setFresh(true);
       // F1: onRange replace or a remount can start a second generate for the same range; share one.
-      const full = await shareAttentionFresh(attentionRangeKey(range.from, range.to), () =>
+      const full = await shareAttentionFresh(`${attentionRangeKey(range.from, range.to)}|${refresh ? "refresh" : "auto"}`, () =>
         getAttention({ data: { ...range, refresh } }),
       );
       if (id !== seq.current) return;
