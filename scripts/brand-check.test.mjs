@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,16 @@ import {
 } from "./brand-check.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The og skill docs live in .grok/skills/, which is gitignored (.grok/* except app-env.json),
+// so a clean checkout or CI doesn't have them. AGENTS.md is always committed, so the doc-pinning
+// tests always check it and add SKILL.md when it's present. The one test that is only about
+// SKILL.md can't run without it.
+const OG_SKILL = ".grok/skills/og/SKILL.md";
+const HAS_OG_SKILL = existsSync(join(TEMPLATE_ROOT, OG_SKILL));
+const OG_SKILL_MISSING = HAS_OG_SKILL
+  ? false
+  : ".grok/skills/og/ is not in this checkout (gitignored platform docs), so there is nothing to pin against";
 const SCRIPT = join(TEMPLATE_ROOT, "scripts/brand-check.mjs");
 
 const GAME_SITE = JSON.stringify({ title: "Wild Race", type: "x:game", card: "custom" });
@@ -308,7 +318,7 @@ const readDoc = (rel) => readFileSync(join(TEMPLATE_ROOT, rel), "utf8");
 test("SKILL.md and AGENTS.md name the marker path and bound this script uses", () => {
   // Prose wraps, so the minute count may straddle a line break.
   const bound = new RegExp(`${OG_PENDING_MAX_AGE_MS / 60_000}\\s+minutes`);
-  for (const rel of [".grok/skills/og/SKILL.md", "AGENTS.md"]) {
+  for (const rel of [...(HAS_OG_SKILL ? [OG_SKILL] : []), "AGENTS.md"]) {
     const doc = readDoc(rel);
     assert.ok(doc.includes(`/workspace/${OG_PENDING_REL_PATH}`), `${rel}: marker path`);
     assert.ok(bound.test(doc), `${rel}: staleness bound`);
@@ -349,7 +359,7 @@ test("the sections that own the brand-task prohibition never affirm a wait", () 
   // keeps a negation in the sentence while instructing exactly the wait.
   const connectors = /(?:\s|[/,;]|\band\b|\bor\b|\bwait_tasks\b|\bget_task_output\b)+$/i;
   const negation = /\b(?:no|never|not|don['’]t)$/i;
-  for (const section of PROHIBITION_SECTIONS) {
+  for (const section of PROHIBITION_SECTIONS.filter((s) => HAS_OG_SKILL || s.rel !== OG_SKILL)) {
     const where = `${section.rel} ${section.label}`;
     const prose = prohibitionSection(section);
     const mentions = [...prose.matchAll(/wait_tasks|get_task_output/g)];
@@ -362,7 +372,7 @@ test("the sections that own the brand-task prohibition never affirm a wait", () 
   }
 });
 
-test("SKILL.md tells the pass to self-check with the flag this CLI accepts", () => {
+test("SKILL.md tells the pass to self-check with the flag this CLI accepts", { skip: OG_SKILL_MISSING }, () => {
   const skill = readDoc(".grok/skills/og/SKILL.md");
   const invocations = skill.match(/node scripts\/brand-check\.mjs[^\n`]*/g) ?? [];
   assert.ok(invocations.length > 0);

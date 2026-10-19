@@ -15,6 +15,12 @@ import { test } from "node:test";
 import { handOver, parseWriteAtomicArgs, stagingError } from "./write-atomic.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The og skill docs live in .grok/skills/, which is gitignored (.grok/* except app-env.json),
+// so a clean checkout or CI doesn't have them. These doc-pinning tests skip only then.
+const OG_SKILL_MISSING = existsSync(join(TEMPLATE_ROOT, ".grok/skills/og/SKILL.md"))
+  ? false
+  : ".grok/skills/og/ is not in this checkout (gitignored platform docs), so there is nothing to pin against";
 const SCRIPT = join(TEMPLATE_ROOT, "scripts/write-atomic.mjs");
 
 function makeWorkspace() {
@@ -164,7 +170,7 @@ test("cli: relative paths follow the script's root, not the caller's cwd", () =>
   assert.equal(existsSync(join(root, "public/og.jpg")), false);
 });
 
-test("every hand-over the og skill prints is one this script accepts", () => {
+test("every hand-over the og skill prints is one this script accepts", { skip: OG_SKILL_MISSING }, () => {
   // The card and banner recipes live in the skill's references/, not SKILL.md.
   const skillDir = join(TEMPLATE_ROOT, ".grok/skills/og");
   const docs = [
