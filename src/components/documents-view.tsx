@@ -198,8 +198,8 @@ export function DocumentsView() {
         />
       ) : (
         <>
-          <div className="flex items-end justify-between gap-3 border-b border-line">
-            <div className="-mb-px flex gap-1 overflow-x-auto" role="tablist" aria-label="Document sections">
+          <div className="flex min-w-0 items-end justify-between gap-3 border-b border-line">
+            <div className="-mb-px flex min-w-0 flex-1 gap-1 overflow-x-auto" role="tablist" aria-label="Document sections">
               {sections.map((item) => {
                 const count = board.documents.filter((doc) => (item.kinds as readonly string[]).includes(doc.kind)).length;
                 const selected = active === item.id;
