@@ -135,7 +135,7 @@ for (const role of ["labor", "subcontractor"] as const) {
   test(`F2c (${role}): Docs is read-only in every section, and createDocument is refused`, async ({ browser }) => {
     const { ctx, page } = await as(browser, role);
     await nav(page, "Docs").click();
-    const tabs = page.getByRole("tablist", { name: "Document sections" }).getByRole("button");
+    const tabs = page.getByRole("tablist", { name: "Document sections" }).getByRole("tab");
     await expect(tabs.first()).toBeVisible();
     for (let i = 0; i < (await tabs.count()); i++) {
       await tabs.nth(i).click();
@@ -152,7 +152,9 @@ for (const role of ["labor", "subcontractor"] as const) {
 test("F2c (lead): can still open an RFI from Docs", async ({ browser }) => {
   const { ctx, page } = await as(browser, "lead");
   await nav(page, "Docs").click();
-  await page.getByRole("tablist", { name: "Document sections" }).getByRole("button", { name: "Change management" }).click();
+  await page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Change management" }).click();
+  // #17: create form is behind "+ New document", not open on the tab alone.
+  await page.getByRole("button", { name: "+ New document" }).click();
   await expect(page.locator("#doc-title")).toBeVisible();
   expect(await call(page, "createDocument", { kind: "rfi", projectId: "", title: "Which grout color?", body: "", counterparty: "", counterpartyEmail: "", amount: null })).toBe("ok");
   await ctx.close();
