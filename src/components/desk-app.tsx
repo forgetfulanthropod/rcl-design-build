@@ -15,7 +15,7 @@ import { SafetyView } from "@/components/safety-view";
 import { DocumentsView } from "@/components/documents-view";
 import { SharingSettings } from "@/components/sharing-settings";
 import { can, type NavId } from "@/lib/permissions";
-import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
+import { SUPER_ADMIN_PHONE_DISPLAY, roleLabel, samePhone } from "@/lib/roles";
 
 type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
 type View = NavId | "team" | "settings";
@@ -174,7 +174,7 @@ export function DeskApp() {
                 ) : null}
               </button>
             ) : null}
-            <UserButton />
+            <UserButton roleLabel={roleLabel(ready.profile.role)} />
           </div>
         </header>
         <OfflineBadge online={online} />

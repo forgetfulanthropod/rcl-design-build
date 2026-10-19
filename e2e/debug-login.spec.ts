@@ -46,10 +46,8 @@ for (const [role, name] of ROLES) {
     await page.goto("/");
     await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
     await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
-    // Name is hidden below sm so the header title keeps room; avatar initial + Sign out stay visible.
-    await expect(page.getByText(name).first()).toBeAttached();
-    await expect(page.locator("header span.rounded-full").first()).toBeVisible();
+    // Phones show a 44px account button with the signed-in name; Sign out lives in its menu (F8).
+    await expect(page.getByRole("button", { name: `Account: ${name}` })).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/390x844-${role}.png`, fullPage: true });
     await ctx.close();
@@ -62,7 +60,8 @@ async function signInAs(browser: import("@playwright/test").Browser, role: strin
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
   await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
+  // Desktop still shows Account; Sign out lives in its menu (F8).
+  await expect(page.getByRole("button", { name: /Account:/ })).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
 

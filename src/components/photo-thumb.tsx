@@ -1,50 +1,75 @@
 import { useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { getReportPhoto } from "@/lib/server/fns";
 
-/** Thumbnail that opens the full-size photo (fetched through the authenticated server fn). */
+/**
+ * Thumbnail that opens the full-size photo (fetched through the authenticated server fn).
+ * The viewer is a Radix dialog: Escape closes it, focus stays inside while open and goes back
+ * to the thumbnail on close, and the page behind doesn't scroll. Clicking the backdrop closes it;
+ * clicking the photo itself doesn't.
+ */
 export function PhotoThumb({ id, thumb, alt }: { id: string; thumb: string; alt: string }) {
   const [full, setFull] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
+
+  async function load() {
+    setError("");
+    if (full) return;
+    try {
+      setFull((await getReportPhoto({ data: { id } })).url);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not open the photo.");
+    }
+  }
+
   return (
-    <>
-      <button
-        type="button"
-        data-photo-id={id}
-        aria-label={`Open ${alt}`}
-        className="block"
-        onClick={async () => {
-          setOpen(true);
-          setError("");
-          if (!full) {
-            try {
-              setFull((await getReportPhoto({ data: { id } })).url);
-            } catch (cause) {
-              setError(cause instanceof Error ? cause.message : "Could not open the photo.");
-            }
-          }
-        }}
-      >
-        <img src={thumb} alt={alt} loading="lazy" className="aspect-square w-full rounded-md object-cover" />
-      </button>
-      {open ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={alt}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/90 p-3"
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) void load();
+      }}
+    >
+      <Dialog.Trigger asChild>
+        <button type="button" data-photo-id={id} aria-label={`Open ${alt}`} className="block">
+          <img src={thumb} alt={alt} loading="lazy" className="aspect-square w-full rounded-md object-cover" />
+        </button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/90" />
+        <Dialog.Content
+          data-testid="photo-viewer"
+          aria-describedby={undefined}
+          className="fixed inset-0 z-50 grid place-items-center p-3 outline-none"
           onClick={() => setOpen(false)}
         >
+          <Dialog.Title className="sr-only">{alt}</Dialog.Title>
           {full ? (
-            <img src={full} alt={alt} data-testid="photo-full" className="max-h-[85dvh] max-w-full rounded-md object-contain" />
+            <img
+              src={full}
+              alt={alt}
+              data-testid="photo-full"
+              className="max-h-[85dvh] max-w-full rounded-md object-contain"
+              onClick={(event) => event.stopPropagation()}
+            />
           ) : (
-            <p className="text-base text-fg">{error || "Opening photo…"}</p>
+            <p className="text-base text-fg" onClick={(event) => event.stopPropagation()}>
+              {error || "Opening photo…"}
+            </p>
           )}
-          <button type="button" className="mt-3 h-12 rounded-md border border-line px-6 text-base text-fg" onClick={() => setOpen(false)}>
-            Close
-          </button>
-        </div>
-      ) : null}
-    </>
+          <Dialog.Close asChild>
+            <button
+              type="button"
+              autoFocus
+              className="absolute right-3 top-3 inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-line bg-surface px-4 text-base text-fg"
+              onClick={(event) => event.stopPropagation()}
+            >
+              Close
+            </button>
+          </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

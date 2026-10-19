@@ -39,6 +39,7 @@ export const ACTIONS = [
   "doc.create",
   "doc.send",
   "doc.status",
+  "jsa.write", // record the daily job safety analysis (lead and up); labor only reads it
   "budget.dollars", // budget, actual and change-order $ on Budgets (03); Leads only via lead_budget_dollars
   "settings.sharing.view",
   "settings.sharing.edit",
@@ -48,16 +49,9 @@ export type Action = (typeof ACTIONS)[number];
 
 const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
-const FIELD = new Set<Action>([
-  "rfi.create",
-  "log.create",
-  "workorder.updateOwn",
-  "report.write",
-  "doc.view",
-  "doc.create",
-  "crew.myWeek",
-]);
+// Field roles read documents; creating them (RFIs included) is the lead's job (spec 05 · F2c).
 // doc.send is not in LABOR: Labor sends only where "Labor can send documents" is on (spec 06).
+const FIELD = new Set<Action>(["log.create", "workorder.updateOwn", "report.write", "doc.view", "crew.myWeek"]);
 const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
@@ -87,6 +81,7 @@ const MATRIX: Record<Role, Set<Action>> = {
     "activity.approve",
     "safety.write",
     "safety.manage",
+    "jsa.write",
     "doc.view",
     "doc.create",
     "doc.send",

@@ -115,6 +115,8 @@ export type ActivityOverview = {
     approved: number;
     activities: ActivityOverviewItem[];
   }[];
+  canAdd: boolean;
+  canEdit: boolean;
   canApprove: boolean;
 };
 
@@ -193,6 +195,8 @@ export async function overviewActivities(
     approved: items.filter((item) => item.status === "approved").length,
     jobs: jobs.map((job) => ({ id: text(job.id), name: text(job.name) })),
     groups: [...groups.values()].sort((a, b) => b.open - a.open || a.projectName.localeCompare(b.projectName)),
+    canAdd: can(me.role, "activity.add"),
+    canEdit: can(me.role, "activity.edit"),
     canApprove: can(me.role, "activity.approve"),
   };
 }

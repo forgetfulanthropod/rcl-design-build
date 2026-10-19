@@ -263,45 +263,95 @@ export async function readPhoto(userId: string, photoId: string) {
 
 // ---------- AI attention summary ----------
 
-import { ATTENTION_SYSTEM as SYSTEM, parseAttention, type AttentionItem, type ModelCall } from "@/lib/attention";
+import { ATTENTION_SYSTEM as SYSTEM, attentionPayload, parseAttention, planAttention, type AttentionItem, type ModelCall } from "@/lib/attention";
 export type { AttentionItem } from "@/lib/attention";
 
+export type AttentionResult = {
+  status: "ok" | "no-key" | "error" | "empty" | "pending";
+  items: AttentionItem[];
+  cached: boolean;
+  /** An older summary for this range; the reports have changed since. A fresh one is on its way. */
+  stale: boolean;
+  generatedAt: string | null;
+  reportCount: number;
+};
+
+/**
+ * AI attention summary. Reads only the narrative columns (no photos, jobs or people), so the
+ * cache check is a couple of small queries. With `cachedOnly` it never calls the model: it
+ * returns an exact hit, the latest older summary for the range (`stale`), or `pending`.
+ */
 export async function attentionSummary(
   userId: string,
-  input: { from: string; to: string; refresh?: boolean },
+  input: { from: string; to: string; refresh?: boolean; cachedOnly?: boolean },
   callModel: ModelCall,
-): Promise<{ status: "ok" | "no-key" | "error" | "empty"; items: AttentionItem[]; cached: boolean; generatedAt: string | null; reportCount: number }> {
-  const { reports } = await reviewReports(userId, { from: input.from, to: input.to, projectId: "", personId: "" });
-  const withText = reports.filter((r) => r.narrative.trim());
-  if (withText.length === 0) return { status: "empty", items: [], cached: false, generatedAt: null, reportCount: 0 };
+): Promise<AttentionResult> {
+  if (!isDay(input.from) || !isDay(input.to)) throw new Error("Pick dates.");
   const sql = await getSql();
-  const me = await member(sql, userId);
-  const payload = withText
-    .map((r) => `[report ${r.id}] ${r.day} · ${r.userName}${r.projectName ? ` · ${r.projectName}` : ""}\n${r.narrative.trim()}`)
-    .join("\n\n");
+  const me = await requirePrincipal(sql, userId);
+  const rows = await sql.query<Row>(
+    `select r.id, r.day::text as day, coalesce(pr.name, '') as user_name, coalesce(p.name, '') as project_name, r.narrative
+     from daily_reports r
+     left join profiles pr on pr.user_id = r.user_id
+     left join projects p on p.id = r.project_id
+     where r.company_id = $1 and r.day between $2 and $3 and btrim(r.narrative) <> ''
+     order by r.day desc, user_name asc`,
+    [me.companyId, input.from, input.to],
+  );
+  const { payload, withText } = attentionPayload(
+    rows.map((r) => ({
+      id: text(r.id),
+      day: dayString(r.day),
+      userName: text(r.user_name),
+      projectName: text(r.project_name),
+      narrative: text(r.narrative),
+    })),
+  );
+  const reportCount = withText.length;
   const hash = createHash("sha256").update(payload).digest("hex");
-  if (!input.refresh) {
-    const hit = await sql<{ items: string; created_at: unknown }>`
-      select items, created_at from attention_summaries
-      where company_id = ${me.companyId} and from_day = ${input.from} and to_day = ${input.to} and input_hash = ${hash}
-    `;
-    if (hit[0]) {
-      return { status: "ok", items: JSON.parse(text(hit[0].items)) as AttentionItem[], cached: true, generatedAt: iso(hit[0].created_at), reportCount: withText.length };
-    }
+  const hits = reportCount
+    ? await sql<{ items: string; created_at: unknown; input_hash: string }>`
+        select items, created_at, input_hash from attention_summaries
+        where company_id = ${me.companyId} and from_day = ${input.from} and to_day = ${input.to}
+        order by (input_hash = ${hash}) desc, created_at desc
+        limit 1
+      `
+    : [];
+  const hit = hits[0];
+  const exactHit = Boolean(hit && text(hit.input_hash) === hash);
+  const plan = planAttention({
+    reportCount,
+    exactHit,
+    latestHit: Boolean(hit),
+    refresh: Boolean(input.refresh),
+    cachedOnly: Boolean(input.cachedOnly),
+  });
+  const base = { cached: false, stale: false, generatedAt: null, reportCount };
+  if (plan.kind === "empty") return { ...base, status: "empty", items: [], reportCount: 0 };
+  if ((plan.kind === "cached" || plan.kind === "stale") && hit) {
+    return {
+      status: "ok",
+      items: JSON.parse(text(hit.items)) as AttentionItem[],
+      cached: true,
+      stale: plan.kind === "stale",
+      generatedAt: iso(hit.created_at),
+      reportCount,
+    };
   }
-  if (!process.env.XAI_API_KEY) return { status: "no-key", items: [], cached: false, generatedAt: null, reportCount: withText.length };
+  if (!process.env.XAI_API_KEY) return { ...base, status: "no-key", items: [] };
+  if (plan.kind === "pending") return { ...base, status: "pending", items: [] };
   let raw: string | null = null;
   try {
     raw = await callModel(SYSTEM, payload.slice(0, 60_000));
   } catch {
     raw = null;
   }
-  if (raw == null) return { status: "error", items: [], cached: false, generatedAt: null, reportCount: withText.length };
+  if (raw == null) return { ...base, status: "error", items: [] };
   const items = parseAttention(raw, withText);
   await sql`
     insert into attention_summaries (id, company_id, from_day, to_day, input_hash, items, model)
     values (${randomUUID()}, ${me.companyId}, ${input.from}, ${input.to}, ${hash}, ${JSON.stringify(items)}, ${"grok-4.5"})
     on conflict (company_id, from_day, to_day, input_hash) do update set items = excluded.items, created_at = now()
   `;
-  return { status: "ok", items, cached: false, generatedAt: new Date().toISOString(), reportCount: withText.length };
+  return { ...base, status: "ok", items, generatedAt: new Date().toISOString() };
 }
