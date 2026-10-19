@@ -60,8 +60,8 @@ async function signInAs(browser: import("@playwright/test").Browser, role: strin
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
   await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-  // Desktop still shows Account; Sign out lives in its menu (F8).
-  await expect(page.getByRole("button", { name: /Account:/ })).toBeVisible({ timeout: 30_000 });
+  // Phones show an account menu (Sign out inside); md+ shows Sign out inline (F8).
+  await expect(page.getByRole("button", { name: /^(Sign out|Account: )/ }).locator("visible=true").first()).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
 

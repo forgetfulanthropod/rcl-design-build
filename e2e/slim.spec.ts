@@ -260,11 +260,12 @@ test("sharing (spec 06): Owner turns Labor sending on for Whitaker; Luis sees Se
       [name, data] as const,
     );
 
-  // Luis files an Oak Street RFI (the demo's Whitaker RFI is already his).
-  const luis = await as(browser, "labor", DESKTOP);
-  const board = (await fn(luis.page, "listDocuments")) as { jobs: { id: string; name: string }[] };
+  // F2c: Labor can no longer create documents. Lead files the Oak Street RFI; demo Whitaker RFI is already Luis's.
+  const lead = await as(browser, "lead", DESKTOP);
+  const board = (await fn(lead.page, "listDocuments")) as { jobs: { id: string; name: string }[] };
   const oak = board.jobs.find((j) => j.name === "Oak Street duplex addition")!;
-  await fn(luis.page, "createDocument", { kind: "rfi", projectId: oak.id, title: "Rear stair landing height", body: "", counterparty: "", counterpartyEmail: "", amount: null });
+  await fn(lead.page, "createDocument", { kind: "rfi", projectId: oak.id, title: "Rear stair landing height", body: "", counterparty: "", counterpartyEmail: "", amount: null });
+  await lead.ctx.close();
 
   // Owner: override on Whitaker, then mark Whitaker (only) reviewed through the dialog.
   const owner = await as(browser, "owner", DESKTOP);
@@ -278,12 +279,13 @@ test("sharing (spec 06): Owner turns Labor sending on for Whitaker; Luis sees Se
   await expect(owner.page.getByTestId("reviewed-line")).toBeVisible();
   await owner.ctx.close();
 
+  const luis = await as(browser, "labor", DESKTOP);
   const openDoc = async (title: string) => {
     await nav(luis.page, "Docs").click();
-    await luis.page.getByRole("button", { name: "Change management", exact: true }).click();
+    // #17: Document sections are role=tab
+    await luis.page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Change management" }).click();
     await luis.page.getByRole("button", { name: new RegExp(title) }).click();
   };
-  await luis.page.reload();
   await openDoc("Pocket door at the pantry");
   await expect(luis.page.getByRole("button", { name: /Send with Resend|Queue on Resend/ })).toBeVisible();
   await expect(luis.page.getByRole("button", { name: "Open in Gmail" })).toBeVisible();
