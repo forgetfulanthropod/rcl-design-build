@@ -13,7 +13,7 @@ async function as(browser: Browser, role: string, viewport: { width: number; hei
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login" && !u.pathname.startsWith("/m/"), { timeout: 30_000 }); // F1: "/" → first view
   await expect(page.locator("#narrative")).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
