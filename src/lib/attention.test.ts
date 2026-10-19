@@ -38,3 +38,38 @@ test("sorts high before medium before low", () => {
   });
   assert.deepEqual(parseAttention(raw, reports).map((i) => i.severity), ["high", "medium", "low"]);
 });
+
+import { attentionPayload, needsFreshAttention, planAttention } from "./attention.ts";
+
+test("payload format is stable, so summaries cached before this change still hit", () => {
+  const { payload, withText } = attentionPayload([
+    { id: "r1", day: "2026-10-10", userName: "Luis Moreno", projectName: "Whitaker kitchen remodel", narrative: "  Cracked rail on the ladder.  " },
+    { id: "r2", day: "2026-10-10", userName: "Lena Ortiz", projectName: "", narrative: "   " },
+    { id: "r3", day: "2026-10-09", userName: "Sam Whitfield", projectName: "", narrative: "Rough-in done." },
+  ]);
+  assert.equal(withText.length, 2);
+  assert.equal(
+    payload,
+    "[report r1] 2026-10-10 · Luis Moreno · Whitaker kitchen remodel\nCracked rail on the ladder.\n\n[report r3] 2026-10-09 · Sam Whitfield\nRough-in done.",
+  );
+});
+
+test("the instant read never waits on the model", () => {
+  const plan = (o: Partial<Parameters<typeof planAttention>[0]>) =>
+    planAttention({ reportCount: 3, exactHit: false, latestHit: false, refresh: false, cachedOnly: true, ...o }).kind;
+  assert.equal(plan({ exactHit: true, latestHit: true }), "cached");
+  assert.equal(plan({ latestHit: true }), "stale");
+  assert.equal(plan({}), "pending");
+  assert.equal(plan({ reportCount: 0 }), "empty");
+  // Refresh skips the cache; only a non-instant call generates.
+  assert.equal(plan({ exactHit: true, refresh: true, cachedOnly: false }), "generate");
+  assert.equal(plan({ exactHit: true, cachedOnly: false }), "cached");
+  assert.equal(plan({ cachedOnly: false }), "generate");
+});
+
+test("the client starts fresh work only for pending or stale answers", () => {
+  assert.equal(needsFreshAttention("pending", false), true);
+  assert.equal(needsFreshAttention("ok", true), true);
+  assert.equal(needsFreshAttention("ok", false), false);
+  for (const s of ["empty", "no-key", "error"]) assert.equal(needsFreshAttention(s, false), false);
+});
