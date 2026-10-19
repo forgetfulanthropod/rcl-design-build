@@ -47,14 +47,29 @@ test("unknown role can do nothing", () => {
   for (const a of ACTIONS) assert.equal(can("hacker", a), false);
 });
 
-test("nav never exceeds 5 tabs and field roles get their own set", () => {
-  for (const r of ROLES) assert.ok(navFor(r).length <= 5, r);
+test("nav stays compact; Owner/Admin/Lead get Crew (spec 01); Labor/Sub do not", () => {
+  for (const r of ROLES) assert.ok(navFor(r).length <= 6, r);
   assert.deepEqual(navFor("labor"), ["today", "mine", "activities", "docs", "safety"]);
   assert.deepEqual(navFor("sub"), ["today", "mine", "docs"]);
-  assert.deepEqual(navFor("lead"), ["today", "mine", "activities", "docs", "safety"]);
+  assert.deepEqual(navFor("lead"), ["today", "mine", "crew", "activities", "docs", "safety"]);
   for (const r of ["owner", "admin", "superadmin"]) {
-    assert.deepEqual(navFor(r), ["reports", "attention", "activities", "docs", "safety"], r);
+    assert.deepEqual(navFor(r), ["reports", "attention", "crew", "activities", "docs", "safety"], r);
   }
+});
+
+test("crew board actions: Owner/Admin/Lead assign; Labor/Sub only myWeek", () => {
+  for (const a of ["crew.board.view", "crew.assign", "crew.publish", "crew.unavailable.confirm"] as const) {
+    assert.equal(can("owner", a), true, a);
+    assert.equal(can("admin", a), true, a);
+    assert.equal(can("lead", a), true, a);
+    assert.equal(can("labor", a), false, a);
+    assert.equal(can("sub", a), false, a);
+  }
+  assert.equal(can("owner", "skill.manage"), true);
+  assert.equal(can("admin", "skill.manage"), true);
+  assert.equal(can("lead", "skill.manage"), false);
+  assert.equal(can("labor", "skill.manage"), false);
+  for (const r of ROLES) assert.equal(can(r, "crew.myWeek"), true, r);
 });
 
 test("invitable roles", () => {

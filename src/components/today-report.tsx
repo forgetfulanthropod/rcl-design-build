@@ -3,6 +3,7 @@ import { addMyPhoto, getMyReport, saveMyReport, submitMyReport } from "@/lib/ser
 import { LunchDial } from "@/components/lunch-dial";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import { PhotoThumb } from "@/components/photo-thumb";
+import { YoureOnCard } from "@/components/crew-view";
 
 type Loaded = Awaited<ReturnType<typeof getMyReport>>;
 type Report = Loaded["report"];
@@ -127,6 +128,7 @@ export function TodayReport() {
 
   return (
     <div className="mx-auto grid max-w-xl gap-4" data-testid="today-report">
+      <YoureOnCard />
       <section className="rounded-md border border-line bg-surface p-4">
         <p className="text-sm font-medium uppercase tracking-widest text-copper">Daily report</p>
         <h2 className="mt-1 text-2xl">{longDay(day)}</h2>

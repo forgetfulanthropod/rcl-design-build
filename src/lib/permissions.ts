@@ -20,6 +20,12 @@ export const ACTIONS = [
   "crew.view",
   "crew.invite",
   "crew.inviteAdmin",
+  "crew.board.view", // whole-company week board (spec 01)
+  "crew.assign", // create/move/remove draft assignments
+  "crew.publish", // publish drafts + outbound messages
+  "skill.manage", // trades, certs, job requirements
+  "crew.unavailable.confirm", // confirm/decline requested time off
+  "crew.myWeek", // own week + request off (everyone)
   "foreman.use",
   "code.approve",
   "report.write", // write my own daily report
@@ -42,7 +48,15 @@ export type Action = (typeof ACTIONS)[number];
 
 const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
-const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn", "report.write", "doc.view", "doc.create"]);
+const FIELD = new Set<Action>([
+  "rfi.create",
+  "log.create",
+  "workorder.updateOwn",
+  "report.write",
+  "doc.view",
+  "doc.create",
+  "crew.myWeek",
+]);
 // doc.send is not in LABOR: Labor sends only where "Labor can send documents" is on (spec 06).
 const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write"]);
 
@@ -62,6 +76,11 @@ const MATRIX: Record<Role, Set<Action>> = {
     "workorder.update",
     "workorder.updateOwn",
     "crew.view",
+    "crew.board.view",
+    "crew.assign",
+    "crew.publish",
+    "crew.unavailable.confirm",
+    "crew.myWeek",
     "report.write",
     "activity.add",
     "activity.edit",
@@ -121,16 +140,17 @@ export function invitableRoles(role: string): Role[] {
   return base;
 }
 
-export type NavId = "today" | "mine" | "reports" | "attention" | "activities" | "safety" | "docs";
+export type NavId = "today" | "mine" | "reports" | "attention" | "crew" | "activities" | "safety" | "docs";
 
 /**
  * The app is slimmed to daily reports. Principals (report.review) review; everyone else writes.
- * The older desk views (jobs, dispatch, RFIs, change orders, milestones, Foreman) are hidden from nav.
+ * Owner/Admin/Lead also get Crew (spec 01). The older desk views stay hidden from nav.
  */
 export function navFor(role: string): NavId[] {
   const items: NavId[] = [];
   if (can(role, "report.review")) items.push("reports", "attention");
   else if (can(role, "report.write")) items.push("today", "mine");
+  if (can(role, "crew.board.view")) items.push("crew");
   if (can(role, "activity.add") || can(role, "activity.approve")) items.push("activities");
   if (can(role, "doc.view")) items.push("docs");
   if (can(role, "safety.write") || can(role, "safety.manage")) items.push("safety");

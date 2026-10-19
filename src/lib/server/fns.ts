@@ -747,3 +747,185 @@ export const listSharingAudit = createServerFn({ method: "GET" })
     const { listAudit } = await import("./sharing.server");
     return listAudit(context.userId, data);
   });
+
+// ---- Crew & skills board (spec 01). Permissions checked in crew.server. ----
+
+export const getCrewBoard = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { week?: string } = {}) => ({ week: optional(input?.week, 10) || undefined }))
+  .handler(async ({ context, data }) => {
+    const { getBoard } = await import("./crew.server");
+    return getBoard(context.userId, data);
+  });
+
+export const assignCrew = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; projectId: string; day: string; part?: string; note?: string }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    projectId: required(input?.projectId, 80, "Job"),
+    day: dayArg(input?.day),
+    part: optional(input?.part, 8) || "full",
+    note: optional(input?.note, 500),
+  }))
+  .handler(async ({ context, data }) => {
+    const { assignPerson } = await import("./crew.server");
+    return assignPerson(context.userId, data);
+  });
+
+export const removeCrewAssignment = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Assignment") }))
+  .handler(async ({ context, data }) => {
+    const { removeAssignment } = await import("./crew.server");
+    return removeAssignment(context.userId, data);
+  });
+
+export const copyCrewLastWeek = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { week?: string } = {}) => ({ week: optional(input?.week, 10) || undefined }))
+  .handler(async ({ context, data }) => {
+    const { copyLastWeek } = await import("./crew.server");
+    return copyLastWeek(context.userId, data);
+  });
+
+export const publishCrewWeek = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { week?: string; confirmWarnings?: boolean } = {}) => ({
+    week: optional(input?.week, 10) || undefined,
+    confirmWarnings: input?.confirmWarnings === true,
+  }))
+  .handler(async ({ context, data }) => {
+    const { publishWeek } = await import("./crew.server");
+    return publishWeek(context.userId, data);
+  });
+
+export const listCrewTrades = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { listTrades } = await import("./crew.server");
+    return listTrades(context.userId);
+  });
+
+export const listCrewCertTypes = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { listCertTypes } = await import("./crew.server");
+    return listCertTypes(context.userId);
+  });
+
+export const setCrewPersonTrade = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; tradeId: string; level?: string }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    tradeId: required(input?.tradeId, 80, "Trade"),
+    level: optional(input?.level, 20) || "journeyman",
+  }))
+  .handler(async ({ context, data }) => {
+    const { setPersonTrade } = await import("./crew.server");
+    return setPersonTrade(context.userId, data);
+  });
+
+export const removeCrewPersonTrade = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; tradeId: string }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    tradeId: required(input?.tradeId, 80, "Trade"),
+  }))
+  .handler(async ({ context, data }) => {
+    const { removePersonTrade } = await import("./crew.server");
+    return removePersonTrade(context.userId, data);
+  });
+
+export const upsertCrewPersonCert = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; certTypeId: string; number?: string; issuedOn?: string; expiresOn?: string; id?: string }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    certTypeId: required(input?.certTypeId, 80, "Cert"),
+    number: optional(input?.number, 80),
+    issuedOn: optional(input?.issuedOn, 10) || undefined,
+    expiresOn: optional(input?.expiresOn, 10) || undefined,
+    id: optional(input?.id, 80) || undefined,
+  }))
+  .handler(async ({ context, data }) => {
+    const { upsertPersonCert } = await import("./crew.server");
+    return upsertPersonCert(context.userId, data);
+  });
+
+export const setCrewJobRequirement = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string; certTypeId: string; on: boolean }) => ({
+    projectId: required(input?.projectId, 80, "Job"),
+    certTypeId: required(input?.certTypeId, 80, "Cert"),
+    on: input?.on === true,
+  }))
+  .handler(async ({ context, data }) => {
+    const { setJobRequirement } = await import("./crew.server");
+    return setJobRequirement(context.userId, data);
+  });
+
+export const setCrewJobLead = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string; leadUserId: string; on: boolean }) => ({
+    projectId: required(input?.projectId, 80, "Job"),
+    leadUserId: required(input?.leadUserId, 80, "Lead"),
+    on: input?.on === true,
+  }))
+  .handler(async ({ context, data }) => {
+    const { setJobLead } = await import("./crew.server");
+    return setJobLead(context.userId, data);
+  });
+
+export const getCrewPerson = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string }) => ({ userId: required(input?.userId, 80, "Person") }))
+  .handler(async ({ context, data }) => {
+    const { getPersonDetail } = await import("./crew.server");
+    return getPersonDetail(context.userId, data);
+  });
+
+export const getCrewCertsMatrix = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getCertsMatrix } = await import("./crew.server");
+    return getCertsMatrix(context.userId);
+  });
+
+export const getMyCrewWeek = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { week?: string } = {}) => ({ week: optional(input?.week, 10) || undefined }))
+  .handler(async ({ context, data }) => {
+    const { getMyWeek } = await import("./crew.server");
+    return getMyWeek(context.userId, data);
+  });
+
+export const requestCrewOff = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { fromDay: string; toDay: string; reason: string; note?: string; forUserId?: string }) => ({
+    fromDay: dayArg(input?.fromDay),
+    toDay: dayArg(input?.toDay),
+    reason: required(input?.reason, 20, "Reason"),
+    note: optional(input?.note, 500),
+    forUserId: optional(input?.forUserId, 80) || undefined,
+  }))
+  .handler(async ({ context, data }) => {
+    const { requestOff } = await import("./crew.server");
+    return requestOff(context.userId, data);
+  });
+
+export const confirmCrewOff = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; status: "confirmed" | "declined" }) => ({
+    id: required(input?.id, 80, "Request"),
+    status: input?.status === "declined" ? ("declined" as const) : ("confirmed" as const),
+  }))
+  .handler(async ({ context, data }) => {
+    const { confirmOff } = await import("./crew.server");
+    return confirmOff(context.userId, data);
+  });
+
+export const getYoureOn = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getYoureOn: run } = await import("./crew.server");
+    return run(context.userId);
+  });

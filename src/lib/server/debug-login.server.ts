@@ -56,8 +56,9 @@ async function seedDemo(sql: Sql) {
     // A demo persona belongs only to the demo company.
     await sql`delete from profiles where user_id = ${id}`;
     await sql`
-      insert into profiles (user_id, company_id, name, email, phone, role)
-      values (${id}, ${DEMO_COMPANY_ID}, ${p.name}, ${p.email}, ${p.phone}, ${p.role})
+      insert into profiles (user_id, company_id, name, email, phone, role, sub_company)
+      values (${id}, ${DEMO_COMPANY_ID}, ${p.name}, ${p.email}, ${p.phone}, ${p.role},
+              ${p.role === "sub" ? "Bluegrass Electric" : null})
     `;
   }
   const { seedSample } = await import("@/lib/server/data.server");
@@ -107,6 +108,7 @@ async function seedDemo(sql: Sql) {
   await seedActivities(sql, ids, jobIds);
   await seedSafety(sql, ids, jobIds);
   await seedDocuments(sql, ids, jobIds);
+  await seedCrew(sql, ids, jobIds);
 }
 
 // A week of realistic daily reports. [daysAgo, persona, job index or -1, narrative, photo indexes, lunch]
@@ -127,6 +129,81 @@ const WEEK: [number, DebugRole, number, string, number[], number][] = [
   [0, "lead", 0, "Whitaker: island set, countertop template Friday. Still waiting on 12 sheets of drywall. Ordered a second 8' ladder.", [5], 30],
   [0, "subcontractor", 1, "Finished unit A rough-in. Inspection requested for Thursday. Need someone to unlock the garage for the inspector.", [0], 20],
 ];
+
+
+async function seedCrew(sql: Sql, ids: Record<DebugRole, string>, jobIds: string[]) {
+  const reg = await sql<{ t: string | null }>`select to_regclass('crew_assignments')::text as t`;
+  if (!reg[0]?.t) return;
+  const { ensureTradeAndCertCatalog } = await import("@/lib/server/crew.server");
+  const { CERT_EXPIRING_DAYS, weekStart, weekDays, todayIso, addDays } = await import("@/lib/crew");
+  await ensureTradeAndCertCatalog(sql, DEMO_COMPANY_ID);
+  await sql`update profiles set sub_company = ${"Bluegrass Electric"} where user_id = ${ids.subcontractor}`;
+  await sql`insert into job_leads (project_id, user_id) values (${jobIds[0]}, ${ids.lead}), (${jobIds[1]}, ${ids.lead}) on conflict do nothing`;
+
+  const trades = await sql<{ id: string; name: string }>`select id, name from trades where company_id = ${DEMO_COMPANY_ID}`;
+  const byTrade = Object.fromEntries(trades.map((t) => [String(t.name), String(t.id)]));
+  const drywall = byTrade["Drywall"];
+  const electrical = byTrade["Electrical"];
+  if (drywall) {
+    await sql`insert into person_trades (company_id, user_id, trade_id, level) values (${DEMO_COMPANY_ID}, ${ids.labor}, ${drywall}, ${"journeyman"}) on conflict do nothing`;
+  }
+  if (electrical) {
+    await sql`insert into person_trades (company_id, user_id, trade_id, level) values (${DEMO_COMPANY_ID}, ${ids.subcontractor}, ${electrical}, ${"lead"}) on conflict do nothing`;
+  }
+
+  const certs = await sql<{ id: string; name: string }>`select id, name from cert_types where company_id = ${DEMO_COMPANY_ID}`;
+  const byCert = Object.fromEntries(certs.map((c) => [String(c.name), String(c.id)]));
+  const osha = byCert["OSHA 10"];
+  const epa = byCert["EPA RRP (lead-safe)"];
+  const monday = weekStart(todayIso());
+  const days = weekDays(monday);
+  // Expiring within CERT_EXPIRING_DAYS from "today" for the demo: today+20
+  const expiring = addDays(todayIso(), Math.min(20, CERT_EXPIRING_DAYS - 1));
+  const expired = addDays(todayIso(), -10);
+  if (osha) {
+    await sql`
+      insert into person_certs (id, company_id, user_id, cert_type_id, number, issued_on, expires_on, verified_by, verified_at)
+      values (${randomUUID()}, ${DEMO_COMPANY_ID}, ${ids.labor}, ${osha}, ${"OSHA-10-DEMO"}, ${addDays(todayIso(), -400)}, ${expiring}, ${ids.owner}, now())
+    `;
+  }
+  if (epa) {
+    // Lead has expired EPA; Whitaker requires it → warning example on board when assigned
+    await sql`
+      insert into person_certs (id, company_id, user_id, cert_type_id, number, issued_on, expires_on, verified_by, verified_at)
+      values (${randomUUID()}, ${DEMO_COMPANY_ID}, ${ids.lead}, ${epa}, ${"EPA-EXPIRED"}, ${addDays(todayIso(), -800)}, ${expired}, ${ids.owner}, now())
+    `;
+    await sql`
+      insert into job_requirements (project_id, company_id, cert_type_id)
+      values (${jobIds[0]}, ${DEMO_COMPANY_ID}, ${epa})
+      on conflict do nothing
+    `;
+  }
+
+  // A week of assignments across jobs (draft + published mix). Leave no actual double-book row
+  // (server rejects them); board still shows orientation warning for labor.
+  const plan: [DebugRole, number, number, string][] = [
+    ["labor", 0, 0, "full"],
+    ["labor", 0, 1, "full"],
+    ["labor", 0, 2, "am"],
+    ["lead", 0, 0, "full"],
+    ["lead", 1, 1, "full"],
+    ["subcontractor", 1, 0, "full"],
+    ["subcontractor", 1, 2, "full"],
+    ["labor", 0, 3, "full"],
+  ];
+  for (const [who, job, dayIdx, part] of plan) {
+    await sql`
+      insert into crew_assignments (
+        id, company_id, user_id, project_id, day, part, note, status, assigned_by
+      ) values (
+        ${randomUUID()}, ${DEMO_COMPANY_ID}, ${ids[who]}, ${jobIds[job]}, ${days[dayIdx]}::date,
+        ${part}, ${""}, ${dayIdx <= 1 ? "published" : "draft"}, ${ids.lead}
+      )
+      on conflict (user_id, day, part) do nothing
+    `;
+  }
+  void CERT_EXPIRING_DAYS;
+}
 
 async function seedDocuments(sql: Sql, ids: Record<DebugRole, string>, jobIds: string[]) {
   const reg = await sql<{ t: string | null }>`select to_regclass('project_documents')::text as t`;

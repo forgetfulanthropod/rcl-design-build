@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ClipboardList, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
+import { AlertTriangle, CalendarRange, ClipboardList, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, getSharingReviewCount, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
-import { CrewView } from "@/components/desk-views";
+import { CrewView as TeamInviteView } from "@/components/desk-views";
+import { CrewView } from "@/components/crew-view";
 import { TodayReport } from "@/components/today-report";
 import { AttentionView, MyReports, ReportsReview } from "@/components/reports-views";
 import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
@@ -27,6 +28,7 @@ const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
   { id: "mine", label: "My reports", icon: History },
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "attention", label: "Attention", icon: AlertTriangle },
+  { id: "crew", label: "Crew", icon: CalendarRange },
   { id: "activities", label: "Activities", icon: ListChecks },
   { id: "safety", label: "Safety", icon: ShieldCheck },
   { id: "docs", label: "Docs", icon: Files },
@@ -118,7 +120,7 @@ export function DeskApp() {
         : nav.some((item) => item.id === view)
           ? (view as NavId)
           : (nav[0]?.id ?? "today");
-  const label = current === "team" ? "Team" : current === "settings" ? "Sharing settings" : NAV.find((item) => item.id === current)?.label;
+  const label = current === "team" ? "Team" : current === "settings" ? "Sharing settings" : current === "crew" ? "Crew" : NAV.find((item) => item.id === current)?.label;
   const openSharing = (projectId = "") => {
     setSharingProject(projectId);
     setView("settings");
@@ -202,7 +204,8 @@ export function DeskApp() {
           ) : null}
           {current === "safety" ? <SafetyView /> : null}
           {current === "docs" ? <DocumentsView /> : null}
-          {current === "team" ? <CrewView data={ready} commit={commit} /> : null}
+          {current === "crew" ? <CrewView role={ready.profile.role} onOpenSharing={canSettings ? (id) => openSharing(id) : undefined} /> : null}
+          {current === "team" ? <TeamInviteView data={ready} commit={commit} /> : null}
           {current === "settings" ? <SharingSettings projectId={sharingProject} onOpenProject={setSharingProject} onChanged={() => setBadgeTick((n) => n + 1)} /> : null}
         </div>
       </div>
