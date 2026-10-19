@@ -111,6 +111,7 @@ export function DocumentsView() {
   const inSection = DOC_SECTIONS.find((item) => item.id === active)?.kinds ?? [];
   const docs = (board?.documents ?? []).filter((doc) => (inSection as readonly string[]).includes(doc.kind));
   const creatable = inSection.filter((item) => {
+    if (!board?.canCreate) return false; // labor and subs read documents only (spec 05 · F2c)
     if (item === "bid" || item === "invoice") return Boolean(board?.moneyVisible);
     if (item === "rfi") return Boolean(board?.canCreate);
     return Boolean(board?.canStatus);
