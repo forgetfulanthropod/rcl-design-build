@@ -22,13 +22,12 @@ const nav = (page: import("@playwright/test").Page, label: string) =>
 async function slowFreshCalls(page: import("@playwright/test").Page, ms: number) {
   const seen = { fresh: 0, quick: 0 };
   await page.route("**/_serverFn/**", async (route) => {
+    // The instant read sends `cachedOnly`; the generate call sends `refresh` and no `cachedOnly`.
     const body = route.request().postData() ?? "";
-    if (body.includes("cachedOnly")) {
-      if (/"cachedOnly":true/.test(body)) seen.quick += 1;
-      else {
-        seen.fresh += 1;
-        await new Promise((r) => setTimeout(r, ms));
-      }
+    if (body.includes("cachedOnly")) seen.quick += 1;
+    else if (body.includes("refresh") && body.includes("from")) {
+      seen.fresh += 1;
+      await new Promise((r) => setTimeout(r, ms));
     }
     await route.continue();
   });
