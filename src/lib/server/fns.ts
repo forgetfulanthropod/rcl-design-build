@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { isDocKind } from "@/lib/documents";
 import { authMiddleware } from "@/lib/auth/middleware";
 
 function required(value: unknown, max: number, label: string): string {
@@ -419,3 +420,218 @@ export const getReportPhoto = createServerFn({ method: "GET" })
     if (!photo) throw new Error("Photo not found.");
     return { url: `data:${photo.mime};base64,${photo.bytes.toString("base64")}` };
   });
+
+export const listActivities = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string }) => ({ day: dayArg(input?.day) }))
+  .handler(async ({ data, context }) => {
+    const { listActivities: run } = await import("./activities.server");
+    return run(context.userId, data.day);
+  });
+
+export const overviewActivities = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { from: string; to: string; projectId: string }) => ({
+    from: dayArg(input?.from),
+    to: dayArg(input?.to),
+    projectId: optional(input?.projectId, 80),
+  }))
+  .handler(async ({ data, context }) => {
+    const { overviewActivities: run } = await import("./activities.server");
+    return run(context.userId, data);
+  });
+
+export const createActivity = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; title: string; detail: string; projectId: string }) => ({
+    day: dayArg(input?.day),
+    title: required(input?.title, 160, "Activity"),
+    detail: optional(input?.detail, 2000),
+    projectId: optional(input?.projectId, 80),
+  }))
+  .handler(async ({ data, context }) => {
+    const { createActivity: run } = await import("./activities.server");
+    return run(context.userId, data);
+  });
+
+export const updateActivity = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; title: string; detail: string; projectId: string }) => ({
+    id: required(input?.id, 80, "Activity"),
+    title: required(input?.title, 160, "Activity"),
+    detail: optional(input?.detail, 2000),
+    projectId: optional(input?.projectId, 80),
+  }))
+  .handler(async ({ data, context }) => {
+    const { updateActivity: run } = await import("./activities.server");
+    return run(context.userId, data);
+  });
+
+export const approveActivity = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((id: string) => required(id, 80, "Activity"))
+  .handler(async ({ data, context }) => {
+    const { approveActivity: run } = await import("./activities.server");
+    return run(context.userId, data);
+  });
+
+function flag(value: unknown): boolean {
+  return value === true;
+}
+
+export const getSafety = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string }) => ({ day: dayArg(input?.day) }))
+  .handler(async ({ data, context }) => {
+    const { getSafety: run } = await import("./safety.server");
+    return run(context.userId, data.day);
+  });
+
+export const saveOrientation = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; personId: string; attended: boolean; attendedOn: string }) => ({
+    day: dayArg(input?.day),
+    personId: required(input?.personId, 80, "Person"),
+    attended: flag(input?.attended),
+    attendedOn: input?.attendedOn ? dayArg(input.attendedOn) : "",
+  }))
+  .handler(async ({ data, context }) => {
+    const { saveOrientation: run } = await import("./safety.server");
+    return run(context.userId, data);
+  });
+
+export const saveJsa = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; projectId: string; hazards: string; controls: string }) => ({
+    day: dayArg(input?.day),
+    projectId: optional(input?.projectId, 80),
+    hazards: required(input?.hazards, 2000, "Hazards"),
+    controls: required(input?.controls, 2000, "Controls"),
+  }))
+  .handler(async ({ data, context }) => {
+    const { saveJsa: run } = await import("./safety.server");
+    return run(context.userId, data);
+  });
+
+export const approveJsa = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; id: string }) => ({
+    day: dayArg(input?.day),
+    id: required(input?.id, 80, "Analysis"),
+  }))
+  .handler(async ({ data, context }) => {
+    const { approveJsa: run } = await import("./safety.server");
+    return run(context.userId, data);
+  });
+
+export const recordInspection = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; projectId: string; inspectedOn: string; notes: string }) => ({
+    day: dayArg(input?.day),
+    projectId: required(input?.projectId, 80, "Job"),
+    inspectedOn: dayArg(input?.inspectedOn),
+    notes: optional(input?.notes, 2000),
+  }))
+  .handler(async ({ data, context }) => {
+    const { recordInspection: run } = await import("./safety.server");
+    return run(context.userId, data);
+  });
+
+export const addTraining = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; title: string; personId: string; dueOn: string }) => ({
+    day: dayArg(input?.day),
+    title: required(input?.title, 160, "Training"),
+    personId: optional(input?.personId, 80),
+    dueOn: input?.dueOn ? dayArg(input.dueOn) : "",
+  }))
+  .handler(async ({ data, context }) => {
+    const { addTraining: run } = await import("./safety.server");
+    return run(context.userId, data);
+  });
+
+function emailArg(value: unknown, label: string): string {
+  const email = required(value, 160, label).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`${label} needs a real email address.`);
+  return email;
+}
+
+export const listDocuments = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { listDocuments: run } = await import("./documents.server");
+    return run(context.userId);
+  });
+
+export const createDocument = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: {
+    kind: string;
+    projectId: string;
+    title: string;
+    body: string;
+    counterparty: string;
+    counterpartyEmail: string;
+    amount: number | null;
+  }) => {
+    const rawKind = required(input?.kind, 40, "Kind");
+    if (!isDocKind(rawKind)) throw new Error("Unknown document.");
+    const raw = input?.amount;
+    const amount = raw == null || (typeof raw === "string" && raw === "") ? null : Number(raw);
+    if (amount != null && (!Number.isFinite(amount) || amount < 0 || amount > 500_000_000)) throw new Error("Enter a dollar amount.");
+    return {
+      kind: rawKind,
+      projectId: optional(input?.projectId, 80),
+      title: required(input?.title, 160, "Title"),
+      body: optional(input?.body, 8000),
+      counterparty: optional(input?.counterparty, 120),
+      counterpartyEmail: input?.counterpartyEmail ? emailArg(input.counterpartyEmail, "Email") : "",
+      amount: amount == null ? null : Math.round(amount),
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const { createDocument: run } = await import("./documents.server");
+    return run(context.userId, data);
+  });
+
+export const setDocumentStatus = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; status: string }) => ({
+    id: required(input?.id, 80, "Document"),
+    status: required(input?.status, 40, "Status"),
+  }))
+  .handler(async ({ data, context }) => {
+    const { setDocumentStatus: run } = await import("./documents.server");
+    return run(context.userId, data);
+  });
+
+export const sendDocument = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; channel: string; to: string; note: string }) => {
+    const channel = input?.channel === "gmail" ? "gmail" : input?.channel === "resend" ? "resend" : null;
+    if (!channel) throw new Error("Pick Resend or Gmail.");
+    return {
+      id: required(input?.id, 80, "Document"),
+      channel,
+      to: emailArg(input?.to, "To"),
+      note: optional(input?.note, 4000),
+    };
+  })
+  .handler(async ({ data, context }) => {
+    const { sendDocument: run } = await import("./documents.server");
+    return run(context.userId, data);
+  });
+
+export const fileDocumentReply = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; channel: string; fromEmail: string; body: string }) => ({
+    id: required(input?.id, 80, "Document"),
+    channel: input?.channel === "resend" ? "resend" as const : "gmail" as const,
+    fromEmail: emailArg(input?.fromEmail, "From"),
+    body: required(input?.body, 8000, "Reply"),
+  }))
+  .handler(async ({ data, context }) => {
+    const { fileDocumentReply: run } = await import("./documents.server");
+    return run(context.userId, data);
+  });
+

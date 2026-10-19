@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ClipboardList, History, NotebookPen, Users } from "lucide-react";
+import { AlertTriangle, ClipboardList, Files, History, ListChecks, NotebookPen, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
@@ -9,6 +9,9 @@ import { useOnline } from "@/lib/use-online";
 import { CrewView } from "@/components/desk-views";
 import { TodayReport } from "@/components/today-report";
 import { AttentionView, MyReports, ReportsReview } from "@/components/reports-views";
+import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
+import { SafetyView } from "@/components/safety-view";
+import { DocumentsView } from "@/components/documents-view";
 import { can, type NavId } from "@/lib/permissions";
 import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
 
@@ -23,6 +26,9 @@ const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
   { id: "mine", label: "My reports", icon: History },
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "attention", label: "Attention", icon: AlertTriangle },
+  { id: "activities", label: "Activities", icon: ListChecks },
+  { id: "safety", label: "Safety", icon: ShieldCheck },
+  { id: "docs", label: "Docs", icon: Files },
 ];
 
 export function DeskApp() {
@@ -141,6 +147,15 @@ export function DeskApp() {
               }}
             />
           ) : null}
+          {current === "activities" ? (
+            can(ready.profile.role, "report.review") ? (
+              <ActivityOverview onOpenDocs={() => setView("docs")} />
+            ) : (
+              <ActivitiesView onOpenDocs={() => setView("docs")} />
+            )
+          ) : null}
+          {current === "safety" ? <SafetyView /> : null}
+          {current === "docs" ? <DocumentsView /> : null}
           {current === "team" ? <CrewView data={ready} commit={commit} /> : null}
         </div>
       </div>

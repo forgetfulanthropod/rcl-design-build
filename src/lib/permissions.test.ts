@@ -46,10 +46,14 @@ test("unknown role can do nothing", () => {
   for (const a of ACTIONS) assert.equal(can("hacker", a), false);
 });
 
-test("nav never exceeds 5 tabs and field roles get 3", () => {
+test("nav never exceeds 5 tabs and field roles get their own set", () => {
   for (const r of ROLES) assert.ok(navFor(r).length <= 5, r);
-  for (const r of ["labor", "sub", "lead"]) assert.deepEqual(navFor(r), ["today", "mine"], r);
-  for (const r of ["owner", "admin", "superadmin"]) assert.deepEqual(navFor(r), ["reports", "attention"], r);
+  assert.deepEqual(navFor("labor"), ["today", "mine", "activities", "docs", "safety"]);
+  assert.deepEqual(navFor("sub"), ["today", "mine", "docs"]);
+  assert.deepEqual(navFor("lead"), ["today", "mine", "activities", "docs", "safety"]);
+  for (const r of ["owner", "admin", "superadmin"]) {
+    assert.deepEqual(navFor(r), ["reports", "attention", "activities", "docs", "safety"], r);
+  }
 });
 
 test("invitable roles", () => {
@@ -70,6 +74,40 @@ test("redactForRole strips dollars for labor and sub only", () => {
   const owner = redactForRole("owner", data);
   assert.equal(owner.projects[0].contractValue, 125000);
   assert.equal(data.projects[0].contractValue, 125000, "input not mutated");
+});
+
+test("lead approves activities; labor can add and edit but not approve", () => {
+  assert.equal(can("labor", "activity.add"), true);
+  assert.equal(can("labor", "activity.edit"), true);
+  assert.equal(can("labor", "activity.approve"), false);
+  assert.equal(can("lead", "activity.add"), true);
+  assert.equal(can("lead", "activity.edit"), true);
+  assert.equal(can("lead", "activity.approve"), true);
+  assert.equal(can("sub", "activity.add"), false);
+  assert.equal(can("owner", "activity.approve"), true);
+  assert.throws(() => assertCan("labor", "activity.approve"), /can't do that/);
+});
+
+test("safety checks: labor records, lead manages, subs stay out", () => {
+  assert.equal(can("labor", "safety.write"), true);
+  assert.equal(can("labor", "safety.manage"), false);
+  assert.equal(can("lead", "safety.write"), true);
+  assert.equal(can("lead", "safety.manage"), true);
+  assert.equal(can("sub", "safety.write"), false);
+  assert.equal(can("owner", "safety.manage"), true);
+  assert.throws(() => assertCan("labor", "safety.manage"), /can't do that/);
+});
+
+test("documents: labor and subs open RFIs, the lead runs the pipeline, only principals approve money", () => {
+  assert.equal(can("labor", "doc.view"), true);
+  assert.equal(can("labor", "doc.create"), true);
+  assert.equal(can("labor", "doc.send"), true);
+  assert.equal(can("labor", "doc.status"), false);
+  assert.equal(can("sub", "doc.send"), false);
+  assert.equal(can("lead", "doc.status"), true);
+  assert.equal(can("lead", "co.status"), false);
+  assert.equal(can("owner", "doc.status"), true);
+  assert.equal(can("owner", "co.status"), true);
 });
 
 test("daily reports: everyone writes, only principals review", () => {

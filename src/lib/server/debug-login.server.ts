@@ -101,6 +101,9 @@ async function seedDemo(sql: Sql) {
             ${"Cabinets delivered. Island base set and leveled. Countertop template Thursday."}, ${ids.lead})
   `;
   await seedReports(sql, ids, jobIds);
+  await seedActivities(sql, ids, jobIds);
+  await seedSafety(sql, ids, jobIds);
+  await seedDocuments(sql, ids, jobIds);
 }
 
 // A week of realistic daily reports. [daysAgo, persona, job index or -1, narrative, photo indexes, lunch]
@@ -121,6 +124,98 @@ const WEEK: [number, DebugRole, number, string, number[], number][] = [
   [0, "lead", 0, "Whitaker: island set, countertop template Friday. Still waiting on 12 sheets of drywall. Ordered a second 8' ladder.", [5], 30],
   [0, "subcontractor", 1, "Finished unit A rough-in. Inspection requested for Thursday. Need someone to unlock the garage for the inspector.", [0], 20],
 ];
+
+async function seedDocuments(sql: Sql, ids: Record<DebugRole, string>, jobIds: string[]) {
+  const reg = await sql<{ t: string | null }>`select to_regclass('project_documents')::text as t`;
+  if (!reg[0]?.t) return;
+  const rows: [string, string, number, string, string, number | null, string, string, string][] = [
+    ["policy", "Jobsite PPE", 0, "Crew", "", null, "In effect", "Hard hat, glasses, and boots on every job. No exceptions.", ids.lead],
+    ["bid", "Kitchen remodel, allowance bid", 0, "Whitaker family", "home@whitaker.test", 186000, "Sent", "Full gut, new island, relocated sink wall.", ids.owner],
+    ["invoice", "Whitaker draw 2", 0, "Whitaker family", "home@whitaker.test", 42000, "Sent", "Rough-in complete. Island framing started.", ids.owner],
+    ["rfi", "Pocket door at the pantry", 0, "Whitaker family", "home@whitaker.test", null, "Open", "She wants the swing door swapped to a pocket door. Need a yes before we frame it.", ids.labor],
+    ["submittal", "Operatory casework", 2, "Bright Smiles PLLC", "office@brightsmiles.test", null, "Sent", "Plastic laminate, 4 operatories. Waiting on the finish sample.", ids.lead],
+    ["change_order", "Neighbor lawn repair after excavation", 1, "Oak Street Partners", "pm@oakstreet.test", 2400, "Draft", "Excavator left a rut on the north side. Seed and grade.", ids.lead],
+  ];
+  for (const [kind, title, job, who, email, amount, status, body, by] of rows) {
+    const id = randomUUID();
+    await sql`
+      insert into project_documents (
+        id, company_id, project_id, kind, number, title, body, amount, status, counterparty, counterparty_email, created_by
+      ) values (
+        ${id}, ${DEMO_COMPANY_ID}, ${jobIds[job]}, ${kind}, ${1}, ${title}, ${body}, ${amount},
+        ${status}, ${who}, ${email}, ${by}
+      )
+    `;
+    if (kind === "submittal") {
+      await sql`
+        insert into document_messages (
+          id, document_id, company_id, direction, channel, to_email, subject, body, status, created_by
+        ) values (
+          ${randomUUID()}, ${id}, ${DEMO_COMPANY_ID}, ${"out"}, ${"resend"}, ${email},
+          ${"Submittal 001 — Operatory casework"}, ${body}, ${"skipped"}, ${ids.lead}
+        )
+      `;
+    }
+  }
+}
+
+async function seedSafety(sql: Sql, ids: Record<DebugRole, string>, jobIds: string[]) {
+  const reg = await sql<{ t: string | null }>`select to_regclass('job_safety_analyses')::text as t`;
+  if (!reg[0]?.t) return;
+  const day = (ago: number) => {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - ago);
+    return date.toISOString().slice(0, 10);
+  };
+  const today = day(0);
+  await sql`
+    insert into safety_orientations (company_id, user_id, attended, attended_on, updated_by)
+    values
+      (${DEMO_COMPANY_ID}, ${ids.lead}, ${true}, ${day(40)}, ${ids.lead}),
+      (${DEMO_COMPANY_ID}, ${ids.labor}, ${false}, ${null}, ${ids.lead})
+    on conflict (company_id, user_id) do nothing
+  `;
+  await sql`
+    insert into job_safety_analyses (id, company_id, project_id, day, hazards, controls, created_by)
+    values (
+      ${randomUUID()}, ${DEMO_COMPANY_ID}, ${jobIds[0]}, ${today},
+      ${"Soft subfloor by the dishwasher. One ladder has a cracked rail."},
+      ${"Replaced the soft spot. Tagged the ladder and took it off the floor."},
+      ${ids.labor}
+    )
+  `;
+  await sql`
+    insert into safety_inspections (id, company_id, project_id, inspected_on, notes, recorded_by)
+    values
+      (${randomUUID()}, ${DEMO_COMPANY_ID}, ${jobIds[0]}, ${day(12)}, ${"Walked the kitchen. Ladder tagged out."}, ${ids.lead}),
+      (${randomUUID()}, ${DEMO_COMPANY_ID}, ${jobIds[1]}, ${day(48)}, ${"Footings looked fine. Neighbor's lawn still rutted."}, ${ids.lead})
+  `;
+  await sql`
+    insert into safety_training (id, company_id, user_id, title, due_on, completed_on, created_by)
+    values
+      (${randomUUID()}, ${DEMO_COMPANY_ID}, ${null}, ${"Monday toolbox talk"}, ${day(7)}, ${day(7)}, ${ids.lead}),
+      (${randomUUID()}, ${DEMO_COMPANY_ID}, ${ids.labor}, ${"OSHA 10"}, ${day(-21)}, ${null}, ${ids.lead})
+  `;
+}
+
+async function seedActivities(sql: Sql, ids: Record<DebugRole, string>, jobIds: string[]) {
+  const reg = await sql<{ t: string | null }>`select to_regclass('activities')::text as t`;
+  if (!reg[0]?.t) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const rows: [string, string, number, DebugRole][] = [
+    ["Hang the rest of the hallway drywall", "Still short 12 sheets of 1/2 inch.", 0, "labor"],
+    ["Unlock the garage for the electrical inspection", "Inspector is Thursday morning.", 1, "lead"],
+  ];
+  for (const [title, detail, job, who] of rows) {
+    await sql`
+      insert into activities (id, company_id, project_id, day, title, detail, created_by, updated_by)
+      values (
+        ${randomUUID()}, ${DEMO_COMPANY_ID}, ${jobIds[job]}, ${today}, ${title}, ${detail}, ${ids[who]}, ${ids[who]}
+      )
+    `;
+  }
+}
 
 async function seedReports(sql: Sql, ids: Record<DebugRole, string>, jobIds: string[]) {
   const reg = await sql<{ t: string | null }>`select to_regclass('daily_reports')::text as t`;

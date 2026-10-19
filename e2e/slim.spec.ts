@@ -38,11 +38,11 @@ test.describe.configure({ mode: "serial" });
 
 test("navigation is tiny and role-based; hidden features are gone from nav", async ({ browser }) => {
   for (const [role, tabs] of [
-    ["labor", ["Today", "My reports"]],
-    ["subcontractor", ["Today", "My reports"]],
-    ["lead", ["Today", "My reports"]],
-    ["owner", ["Reports", "Attention"]],
-    ["admin", ["Reports", "Attention"]],
+    ["labor", ["Today", "My reports", "Activities", "Docs", "Safety"]],
+    ["subcontractor", ["Today", "My reports", "Docs"]],
+    ["lead", ["Today", "My reports", "Activities", "Docs", "Safety"]],
+    ["owner", ["Reports", "Attention", "Activities", "Docs", "Safety"]],
+    ["admin", ["Reports", "Attention", "Activities", "Docs", "Safety"]],
   ] as const) {
     const { ctx, page } = await as(browser, role);
     const bar = page.getByRole("navigation", { name: "Main" });

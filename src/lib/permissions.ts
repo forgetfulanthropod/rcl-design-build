@@ -23,12 +23,22 @@ export const ACTIONS = [
   "code.approve",
   "report.write", // write my own daily report
   "report.review", // browse everyone's reports + AI attention summary
+  "activity.add",
+  "activity.edit",
+  "activity.approve",
+  "safety.write",
+  "safety.manage",
+  "doc.view",
+  "doc.create",
+  "doc.send",
+  "doc.status",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
 const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
-const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn", "report.write"]);
+const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn", "report.write", "doc.view", "doc.create"]);
+const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write", "doc.send"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
   superadmin: ALL,
@@ -47,8 +57,17 @@ const MATRIX: Record<Role, Set<Action>> = {
     "workorder.updateOwn",
     "crew.view",
     "report.write",
+    "activity.add",
+    "activity.edit",
+    "activity.approve",
+    "safety.write",
+    "safety.manage",
+    "doc.view",
+    "doc.create",
+    "doc.send",
+    "doc.status",
   ]),
-  labor: FIELD,
+  labor: LABOR,
   sub: FIELD,
 };
 
@@ -76,16 +95,20 @@ export function invitableRoles(role: string): Role[] {
   return base;
 }
 
-export type NavId = "today" | "mine" | "reports" | "attention";
+export type NavId = "today" | "mine" | "reports" | "attention" | "activities" | "safety" | "docs";
 
 /**
  * The app is slimmed to daily reports. Principals (report.review) review; everyone else writes.
  * The older desk views (jobs, dispatch, RFIs, change orders, milestones, Foreman) are hidden from nav.
  */
 export function navFor(role: string): NavId[] {
-  if (can(role, "report.review")) return ["reports", "attention"];
-  if (can(role, "report.write")) return ["today", "mine"];
-  return [];
+  const items: NavId[] = [];
+  if (can(role, "report.review")) items.push("reports", "attention");
+  else if (can(role, "report.write")) items.push("today", "mine");
+  if (can(role, "activity.add") || can(role, "activity.approve")) items.push("activities");
+  if (can(role, "doc.view")) items.push("docs");
+  if (can(role, "safety.write") || can(role, "safety.manage")) items.push("safety");
+  return items;
 }
 
 type Moneyed = {
