@@ -111,7 +111,7 @@ export function DeskApp() {
         </nav>
       </aside>
       <div className="flex min-w-0 flex-col pb-20 md:pb-0">
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <header data-desk-header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div className="shrink-0">
             <p className="font-display text-2xl">{label}</p>
             <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
