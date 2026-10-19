@@ -80,7 +80,7 @@ for (const role of ["owner", "admin"] as const) {
     await page.locator("#doc-type").selectOption({ label: "RFI" });
     await page.locator("#doc-job").selectOption({ index: 1 });
     await page.locator("#doc-title").fill(`Which grout color? (${role})`);
-    await page.getByRole("button", { name: "Add rfi" }).click();
+    await page.getByRole("button", { name: "Add RFI", exact: true }).click();
     await expect(page.getByTestId("doc-created")).toHaveText(/^RFI \d{3} created$/);
     await expect(page.getByText(`Which grout color? (${role})`).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "+ New document" })).toHaveCount(0); // we're on the document now
@@ -97,6 +97,19 @@ test("owner: a policy has no recipient fields", async ({ browser }) => {
   await expect(page.locator("#doc-email")).toHaveCount(0);
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByTestId("new-document")).toHaveCount(0);
+  await ctx.close();
+});
+
+test("owner: submit buttons keep acronyms uppercase (Add RFI, Add submittal, Add change order)", async ({ browser }) => {
+  const { ctx, page } = await as(browser, "owner");
+  await tab(page, "Change management").click();
+  await page.getByRole("button", { name: "+ New document" }).click();
+  const form = page.getByTestId("new-document");
+  for (const [type, label] of [["RFI", "Add RFI"], ["Submittal", "Add submittal"], ["Change order", "Add change order"]]) {
+    await page.locator("#doc-type").selectOption({ label: type });
+    await expect(form.getByRole("button", { name: label, exact: true })).toBeVisible();
+  }
+  await expect(form.getByRole("button", { name: /Add (rfi|change Order)/ })).toHaveCount(0);
   await ctx.close();
 });
 

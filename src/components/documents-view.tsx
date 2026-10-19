@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createDocument, fileDocumentReply, listDocuments, sendDocument, setDocumentStatus } from "@/lib/server/fns";
 import { Drawer } from "vaul";
-import { DOC_LABEL, DOC_SECTIONS, DOC_STATUSES, SECTION_EMPTY, createdMessage, docFormFields, documentNumber, newDocumentId, sectionFor, visibleSections, type DocKind, type DocSectionId } from "@/lib/documents";
+import { DOC_LABEL, DOC_SECTIONS, addButtonLabel, DOC_STATUSES, SECTION_EMPTY, createdMessage, docFormFields, documentNumber, newDocumentId, sectionFor, visibleSections, type DocKind, type DocSectionId } from "@/lib/documents";
 import { BigButton, Button, EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 
 type Board = Awaited<ReturnType<typeof listDocuments>>;
@@ -309,7 +309,7 @@ export function DocumentsView() {
                 ) : null}
                 <div className="grid grid-cols-2 gap-2">
                   <BigButton type="submit" disabled={busy || !title.trim()}>
-                    Add {DOC_LABEL[createKind].toLowerCase()}
+                    {addButtonLabel(createKind)}
                   </BigButton>
                   <Button type="button" tone="ghost" className="h-14" onClick={() => setCreating(false)}>
                     Cancel

@@ -107,3 +107,14 @@ export function newDocumentId(before: { id: string }[], after: { id: string }[])
   const seen = new Set(before.map((doc) => doc.id));
   return after.find((doc) => !seen.has(doc.id))?.id ?? null;
 }
+
+/**
+ * The New document submit label: "Add policy", "Add change order", but acronyms stay
+ * uppercase ("Add RFI", not "Add rfi").
+ */
+export function addButtonLabel(kind: DocKind): string {
+  const label = DOC_LABEL[kind];
+  const first = label.split(" ")[0];
+  const acronym = first.length > 1 && first === first.toUpperCase();
+  return `Add ${acronym ? label : label.charAt(0).toLowerCase() + label.slice(1)}`;
+}
