@@ -231,6 +231,68 @@ function shift(day: string, days: number): string {
   return localDay(date);
 }
 
+/** Add or edit one activity. Used by the owner/admin overview (spec 05 · F2a). */
+export function ActivityForm({
+  jobs,
+  initial,
+  submitLabel,
+  idPrefix,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  jobs: { id: string; name: string }[];
+  initial: { title: string; detail: string; projectId: string; day: string };
+  submitLabel: string;
+  idPrefix: string;
+  busy: boolean;
+  onSubmit: (value: { title: string; detail: string; projectId: string; day: string }) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(initial.title);
+  const [detail, setDetail] = useState(initial.detail);
+  const [projectId, setProjectId] = useState(initial.projectId);
+  const [day, setDay] = useState(initial.day);
+  return (
+    <form
+      className="grid gap-2"
+      aria-label={submitLabel}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (title.trim()) onSubmit({ title, detail, projectId, day });
+      }}
+    >
+      <label className="text-sm text-muted" htmlFor={`${idPrefix}-title`}>Activity</label>
+      <input id={`${idPrefix}-title`} className="field" value={title} placeholder="What needs doing" onChange={(e) => setTitle(e.target.value)} />
+      <label className="text-sm text-muted" htmlFor={`${idPrefix}-detail`}>Detail</label>
+      <textarea id={`${idPrefix}-detail`} className="field min-h-20" value={detail} onChange={(e) => setDetail(e.target.value)} />
+      <label className="text-sm text-muted" htmlFor={`${idPrefix}-job`}>Job</label>
+      <select id={`${idPrefix}-job`} className="field" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+        <option value="">No job</option>
+        {jobs.map((job) => (
+          <option key={job.id} value={job.id}>
+            {job.name}
+          </option>
+        ))}
+      </select>
+      {idPrefix === "ov-add" ? (
+        <>
+          <label className="text-sm text-muted" htmlFor={`${idPrefix}-day`}>Day</label>
+          <input id={`${idPrefix}-day`} type="date" className="field" value={day} onChange={(e) => setDay(e.target.value)} />
+        </>
+      ) : null}
+      <div className="grid grid-cols-2 gap-2">
+        <Button type="submit" disabled={busy || !title.trim()}>
+          {submitLabel}
+        </Button>
+        <Button type="button" tone="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 type Overview = Awaited<ReturnType<typeof overviewActivities>>;
 
 /** Owner and admin view: counts and the work, grouped by job. */
@@ -261,6 +323,8 @@ export function ActivityOverview({
   const [busy, setBusy] = useState(false);
   const [moreFilters, setMoreFilters] = useState(false);
   const [tick, setTick] = useState(0);
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -277,18 +341,20 @@ export function ActivityOverview({
     };
   }, [from, to, projectId, tick]);
 
-  async function approve(id: string) {
+  async function save(work: () => Promise<unknown>, fallback: string, after?: () => void) {
     setBusy(true);
     setError("");
     try {
-      await approveActivity({ data: id });
+      await work();
+      after?.();
       setTick((n) => n + 1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not approve that.");
+      setError(cause instanceof Error ? cause.message : fallback);
     } finally {
       setBusy(false);
     }
   }
+  const approve = (id: string) => save(() => approveActivity({ data: id }), "Could not approve that.");
 
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
@@ -336,9 +402,28 @@ export function ActivityOverview({
             ))}
           </select>
         </div>
+        {data?.canAdd && !adding ? (
+          <Button type="button" className="mt-2" onClick={() => setAdding(true)}>
+            + Add activity
+          </Button>
+        ) : null}
       </form>
       <div className="grid content-start gap-3">
         {error ? <ErrorBanner message={error} /> : null}
+        {data?.canAdd && adding ? (
+          <section className="rounded-md border border-line bg-surface p-4" data-testid="overview-add">
+            <h2 className="mb-2 text-lg text-fg">New activity</h2>
+            <ActivityForm
+              jobs={data.jobs}
+              initial={{ title: "", detail: "", projectId, day: from <= to ? from : to }}
+              submitLabel="Add activity"
+              idPrefix="ov-add"
+              busy={busy}
+              onCancel={() => setAdding(false)}
+              onSubmit={(value) => void save(() => createActivity({ data: value }), "Could not add that.", () => setAdding(false))}
+            />
+          </section>
+        ) : null}
         {!data ? (
           <Skeleton lines={4} label="Loading the overview" />
         ) : (
@@ -361,6 +446,24 @@ export function ActivityOverview({
                   <ul className="mt-3 grid gap-3">
                     {group.activities.map((item) => (
                       <li key={item.id} className="border-t border-line pt-3" data-testid="overview-activity">
+                        {editing === item.id ? (
+                          <ActivityForm
+                            jobs={data.jobs}
+                            initial={{ title: item.title, detail: item.detail, projectId: item.projectId ?? "", day: item.day }}
+                            submitLabel="Save"
+                            idPrefix={`ov-edit-${item.id}`}
+                            busy={busy}
+                            onCancel={() => setEditing(null)}
+                            onSubmit={(value) =>
+                              void save(
+                                () => updateActivity({ data: { id: item.id, title: value.title, detail: value.detail, projectId: value.projectId } }),
+                                "Could not save that.",
+                                () => setEditing(null),
+                              )
+                            }
+                          />
+                        ) : (
+                        <>
                         <div className="flex items-start justify-between gap-3">
                           <h3 className="text-base text-fg">{item.title}</h3>
                           <span className={`shrink-0 text-sm ${item.status === "approved" ? "text-copper" : "text-muted"}`}>
@@ -372,11 +475,20 @@ export function ActivityOverview({
                           {longDay(item.day)} · {item.createdByName || "crew"}
                           {item.status === "approved" && item.approvedByName ? ` · approved by ${item.approvedByName}` : ""}
                         </p>
-                        {data.canApprove && item.status !== "approved" ? (
-                          <Button type="button" className="mt-2" disabled={busy} onClick={() => void approve(item.id)}>
-                            Approve
-                          </Button>
-                        ) : null}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {data.canEdit && (item.status !== "approved" || data.canApprove) ? (
+                            <Button type="button" tone="ghost" onClick={() => setEditing(item.id)} aria-label={`Edit ${item.title}`}>
+                              Edit
+                            </Button>
+                          ) : null}
+                          {data.canApprove && item.status !== "approved" ? (
+                            <Button type="button" disabled={busy} onClick={() => void approve(item.id)}>
+                              Approve
+                            </Button>
+                          ) : null}
+                        </div>
+                        </>
+                        )}
                       </li>
                     ))}
                   </ul>

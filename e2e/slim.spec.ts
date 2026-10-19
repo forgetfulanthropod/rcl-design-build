@@ -15,8 +15,9 @@ async function as(browser: Browser, role: string, viewport = PHONE) {
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login", { timeout: 30_000 }); // "/" now redirects to the role's first view (F1)
-  await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
+  // F1: "/" redirects to the role's first view. F8: phone Account menu or md+ Sign out.
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login", { timeout: 30_000 });
+  await expect(page.getByRole("button", { name: /^(Sign out|Account: )/ }).locator("visible=true").first()).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }
 

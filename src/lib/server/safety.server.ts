@@ -50,6 +50,8 @@ export type SafetyDesk = {
   courses: SafetyCourse[];
   jobs: { id: string; name: string }[];
   canWrite: boolean;
+  /** Record the daily JSA. Lead and up; labor sees it read-only (spec 05 · F2b). */
+  canWriteJsa: boolean;
   canManage: boolean;
   selfId: string;
 };
@@ -188,6 +190,7 @@ async function desk(sql: Sql, companyId: string, role: string, selfId: string, d
     courses,
     jobs: jobs.map((job) => ({ id: text(job.id), name: text(job.name) })),
     canWrite: can(role, "safety.write"),
+    canWriteJsa: can(role, "jsa.write"),
     canManage: manage,
     selfId,
   };
@@ -232,7 +235,7 @@ export async function saveJsa(
   input: { day: string; projectId: string; hazards: string; controls: string },
 ): Promise<SafetyDesk> {
   const opened = await openDesk(userId, input.day);
-  assertCan(opened.role, "safety.write");
+  assertCan(opened.role, "jsa.write");
   let projectId: string | null = null;
   if (input.projectId) {
     const job = await opened.sql<{ id: string }>`

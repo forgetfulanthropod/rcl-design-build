@@ -10,7 +10,7 @@ import { navFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
 import { can, type NavId } from "@/lib/permissions";
 import { NOT_ON_DESK, VIEW_LABEL, VIEW_PATH, canOpen, defaultPath, pageTitle, viewForPath, type DeskView } from "@/lib/desk-routes";
-import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
+import { SUPER_ADMIN_PHONE_DISPLAY, roleLabel, samePhone } from "@/lib/roles";
 
 type View = DeskView;
 
@@ -160,7 +160,7 @@ export function DeskApp({ children }: { children?: ReactNode }) {
                 <Users className="size-4" aria-hidden="true" /> Team
               </button>
             ) : null}
-            <UserButton />
+            <UserButton roleLabel={roleLabel(ready.profile.role)} />
           </div>
         </header>
         <OfflineBadge online={online} />

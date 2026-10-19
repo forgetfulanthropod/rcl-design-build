@@ -32,12 +32,14 @@ export const ACTIONS = [
   "doc.create",
   "doc.send",
   "doc.status",
+  "jsa.write", // record the daily job safety analysis (lead and up); labor only reads it
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
 const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
-const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn", "report.write", "doc.view", "doc.create"]);
+// Field roles read documents; creating them (RFIs included) is the lead's job (spec 05 · F2c).
+const FIELD = new Set<Action>(["log.create", "workorder.updateOwn", "report.write", "doc.view"]);
 const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write", "doc.send"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
@@ -62,6 +64,7 @@ const MATRIX: Record<Role, Set<Action>> = {
     "activity.approve",
     "safety.write",
     "safety.manage",
+    "jsa.write",
     "doc.view",
     "doc.create",
     "doc.send",

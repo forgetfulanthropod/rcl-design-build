@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { needsFreshAttention } from "@/lib/attention";
 import { getAttention, listMyReports, reviewReports } from "@/lib/server/fns";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { ReportCard } from "@/components/report-card";
@@ -195,18 +196,42 @@ export function AttentionView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
   const [data, setData] = useState<Attention | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); // the instant, cache-only read
+  const [fresh, setFresh] = useState(false); // a fresh AI summary is being written
   const [error, setError] = useState("");
+  const seq = useRef(0);
 
+  /**
+   * Two steps so a cached summary shows at once: a cache-only read that never waits on the AI,
+   * then, only when the reports changed or were never summarized (or on Refresh), the slow
+   * generate call in the background with a progress bar. Stale results stay on screen meanwhile.
+   */
   async function run(refresh = false) {
-    setBusy(true);
+    const id = ++seq.current;
+    const range = { from: from <= to ? from : to, to: from <= to ? to : from };
     setError("");
     try {
-      setData(await getAttention({ data: { from: from <= to ? from : to, to: from <= to ? to : from, refresh } }));
+      let generate = refresh;
+      if (!refresh) {
+        setBusy(true);
+        const quick = await getAttention({ data: { ...range, cachedOnly: true } });
+        if (id !== seq.current) return;
+        setData(quick);
+        setBusy(false);
+        generate = needsFreshAttention(quick.status, quick.stale);
+      }
+      if (!generate) return;
+      setFresh(true);
+      const full = await getAttention({ data: { ...range, refresh } });
+      if (id !== seq.current) return;
+      setData(full);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not build the summary.");
+      if (id === seq.current) setError(cause instanceof Error ? cause.message : "Could not build the summary.");
     } finally {
-      setBusy(false);
+      if (id === seq.current) {
+        setBusy(false);
+        setFresh(false);
+      }
     }
   }
 
@@ -245,12 +270,22 @@ export function AttentionView({
           To
           <input type="date" className="field" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <button type="button" className="h-11 rounded-md border border-line px-4 text-sm text-fg disabled:opacity-60" disabled={busy} onClick={() => void run(true)}>
-          {busy ? "Reading…" : "Refresh"}
+        <button type="button" className="h-11 rounded-md border border-line px-4 text-sm text-fg disabled:opacity-60" disabled={busy || fresh} onClick={() => void run(true)}>
+          {fresh ? "Reading…" : "Refresh"}
         </button>
       </div>
+      {fresh ? (
+        <div className="grid gap-2" data-testid="attention-progress">
+          <p className="text-sm text-muted" role="status">
+            {data?.status === "ok" ? "Showing the last summary. " : ""}Reading {data?.reportCount || ""} report{data?.reportCount === 1 ? "" : "s"} for a fresh summary…
+          </p>
+          <div role="progressbar" aria-label="Writing a fresh summary" className="h-1 overflow-hidden rounded-full bg-raised">
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-copper" />
+          </div>
+        </div>
+      ) : null}
       {error ? <ErrorBanner message={error} onRetry={() => void run(true)} /> : null}
-      {busy && !data ? <Skeleton lines={4} label="Reading reports" /> : null}
+      {(busy || fresh) && (!data || data.status === "pending") ? <Skeleton lines={4} label="Reading reports" /> : null}
       {data?.status === "no-key" ? (
         <EmptyState
           title="AI summary isn't set up"
@@ -263,7 +298,7 @@ export function AttentionView({
         <>
           <p className="text-sm text-muted">
             Read {data.reportCount} report{data.reportCount === 1 ? "" : "s"}
-            {data.generatedAt ? ` · ${data.cached ? "cached" : "generated"} ${new Date(data.generatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
+            {data.generatedAt ? ` · ${data.stale ? "last summary" : data.cached ? "cached" : "generated"} ${new Date(data.generatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}
           </p>
           {data.items.length === 0 ? (
             <EmptyState title="Nothing needs attention" body="No safety, delay, material, damage, or client issues in these reports." />

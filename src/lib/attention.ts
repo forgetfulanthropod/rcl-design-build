@@ -63,3 +63,46 @@ export function parseAttention(
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
 
+export type AttentionInput = { id: string | null; day: string; userName: string; projectName: string; narrative: string };
+
+/**
+ * The exact text the model reads, and the cache key's source. Only reports with a narrative
+ * are included. Keep this format stable: summaries already cached are keyed by its hash.
+ */
+export function attentionPayload(reports: AttentionInput[]): { payload: string; withText: AttentionInput[] } {
+  const withText = reports.filter((r) => r.narrative.trim());
+  const payload = withText
+    .map((r) => `[report ${r.id}] ${r.day} · ${r.userName}${r.projectName ? ` · ${r.projectName}` : ""}\n${r.narrative.trim()}`)
+    .join("\n\n");
+  return { payload, withText };
+}
+
+export type AttentionPlan =
+  | { kind: "empty" } // nothing to read
+  | { kind: "cached" } // exact cache hit for the current reports: answer instantly
+  | { kind: "stale" } // reports changed since the last summary: show the last one, refresh after
+  | { kind: "pending" } // never summarized: say so instantly, generate after
+  | { kind: "generate" }; // the caller asked for fresh work now
+
+/**
+ * What a request should do. The first, instant request (`cachedOnly`) never waits on the model:
+ * it returns an exact hit, the latest older summary for the range (stale), or a pending marker.
+ * The client then makes the slow `generate` call in the background with a progress indicator.
+ */
+export function planAttention(input: {
+  reportCount: number;
+  exactHit: boolean;
+  latestHit: boolean;
+  refresh: boolean;
+  cachedOnly: boolean;
+}): AttentionPlan {
+  if (input.reportCount === 0) return { kind: "empty" };
+  if (input.exactHit && !input.refresh) return { kind: "cached" };
+  if (!input.cachedOnly) return { kind: "generate" };
+  return input.latestHit ? { kind: "stale" } : { kind: "pending" };
+}
+
+/** True when the client should start the slow, fresh summary after showing the instant answer. */
+export function needsFreshAttention(status: string, stale: boolean): boolean {
+  return status === "pending" || (status === "ok" && stale);
+}
