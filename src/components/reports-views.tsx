@@ -171,12 +171,12 @@ function SharingReviewSection({ onReview }: { onReview: (projectId: string) => v
   }, []);
   if (!queue || queue.length === 0) return null;
   return (
-    <section className="grid gap-2 rounded-md border border-copper bg-surface p-4" aria-label="Sharing review needed" data-testid="sharing-review-section">
+    <section className="grid min-w-0 gap-2 rounded-md border border-copper bg-surface p-4" aria-label="Sharing review needed" data-testid="sharing-review-section">
       <h2 className="font-display text-lg text-fg">Sharing review needed ({queue.length})</h2>
-      <ul className="grid max-h-64 gap-2 overflow-y-auto md:max-h-none">
+      <ul className="grid max-h-64 grid-cols-[minmax(0,1fr)] gap-2 overflow-y-auto md:max-h-none">
         {queue.map((job) => (
-          <li key={job.id} className="flex items-center justify-between gap-3 border-t border-line pt-2 first:border-t-0 first:pt-0">
-            <div className="min-w-0">
+          <li key={job.id} className="flex min-w-0 items-center justify-between gap-3 border-t border-line pt-2 first:border-t-0 first:pt-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate text-base text-fg">{job.name}</p>
               <p className="truncate text-sm text-muted">
                 Created by {job.requestedBy || "someone"}
@@ -225,7 +225,7 @@ export function AttentionView({
   }, [from, to]);
 
   return (
-    <div className="mx-auto grid max-w-3xl gap-4">
+    <div className="mx-auto grid min-w-0 max-w-3xl gap-4">
       {onReviewSharing ? <SharingReviewSection onReview={onReviewSharing} /> : null}
       <div className="grid gap-2 rounded-md border border-line bg-surface p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <div className="grid grid-cols-3 gap-2 sm:col-span-3">

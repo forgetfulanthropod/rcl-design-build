@@ -115,7 +115,7 @@ export function SharingSettings({
   }, [notice]);
 
   return (
-    <div className="mx-auto grid max-w-4xl gap-4" data-testid="sharing-settings">
+    <div className="mx-auto grid w-full min-w-0 max-w-4xl gap-4" data-testid="sharing-settings">
       <div className="flex gap-1 overflow-x-auto border-b border-line" role="tablist" aria-label="Sharing settings">
         {(
           [
@@ -274,10 +274,10 @@ function Projects({ onOpen }: { onOpen: (id: string) => void }) {
         {data.queue.length === 0 ? (
           <EmptyState title="Every job's sharing has been reviewed." />
         ) : (
-          <ul className="grid gap-2">
+          <ul className="grid grid-cols-[minmax(0,1fr)] gap-2">
             {data.queue.map((job) => (
-              <li key={job.id} className="flex items-center justify-between gap-3 rounded-md border border-line bg-surface p-3" data-testid="queue-row">
-                <div className="min-w-0">
+              <li key={job.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-line bg-surface p-3" data-testid="queue-row">
+                <div className="min-w-0 flex-1">
                   <p className="truncate text-base text-fg">
                     {job.name}
                     {job.archived ? <span className="text-muted"> · archived</span> : null}
@@ -295,9 +295,35 @@ function Projects({ onOpen }: { onOpen: (id: string) => void }) {
           </ul>
         )}
       </section>
-      <section className="grid gap-2" aria-label="All projects">
+      <section className="grid min-w-0 gap-2" aria-label="All projects">
         <h2 className="font-display text-lg text-fg">All projects</h2>
-        <div className="overflow-x-auto rounded-md border border-line">
+        {/* Phones: stacked cards so no column hangs off-screen. */}
+        <ul className="grid gap-2 md:hidden">
+          {data.projects.map((job) => (
+            <li key={job.id} className="grid gap-2 rounded-md border border-line bg-surface p-3" data-testid="project-row">
+              <div className="flex min-w-0 items-start justify-between gap-2">
+                <button type="button" className="min-h-11 min-w-0 flex-1 truncate text-left text-fg underline" onClick={() => onOpen(job.id)}>
+                  {job.name}
+                </button>
+                <ReviewChip review={job.review} />
+              </div>
+              <dl className="grid gap-1 text-sm">
+                {SHARING_KEYS.map((key) => (
+                  <div key={key} className="flex min-w-0 justify-between gap-3">
+                    <dt className="text-muted">{SHARING_LABEL[key]}</dt>
+                    <dd className="truncate text-fg">{describeEffective(job.effective[key])}</dd>
+                  </div>
+                ))}
+                <div className="flex min-w-0 justify-between gap-3">
+                  <dt className="text-muted">Last review</dt>
+                  <dd className="truncate text-muted">{job.reviewedAt ? `${job.reviewedBy} · ${day(job.reviewedAt)}` : "—"}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+        {/* md+: table in a real scrollport (min-w-0 so the track does not grow to 36rem). */}
+        <div className="hidden min-w-0 overflow-x-auto rounded-md border border-line md:block">
           <table className="w-full min-w-[36rem] text-left text-sm">
             <thead className="text-muted">
               <tr>

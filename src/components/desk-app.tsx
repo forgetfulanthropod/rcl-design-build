@@ -125,7 +125,7 @@ export function DeskApp() {
   };
 
   return (
-    <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
+    <div className="min-h-dvh min-w-0 md:grid md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
       <aside className="hidden border-r border-line bg-surface md:flex md:flex-col md:px-3 md:py-5">
         <div className="flex items-center gap-2 px-2">
           <Mark />
@@ -141,12 +141,12 @@ export function DeskApp() {
         </nav>
       </aside>
       <div className="flex min-w-0 flex-col pb-20 md:pb-0">
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <div className="shrink-0">
-            <p className="font-display text-2xl">{label}</p>
+        <header className="flex min-w-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-2xl">{label}</p>
             <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
           </div>
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             {canTeam ? (
               <button
                 type="button"
