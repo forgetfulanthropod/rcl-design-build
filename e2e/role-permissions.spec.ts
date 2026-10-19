@@ -68,8 +68,9 @@ for (const role of ["owner", "admin"] as const) {
 
     await item.getByRole("button", { name: `Edit ${title}` }).click();
     const edited = `${title}, both sides`;
-    await item.getByRole("textbox", { name: "Activity", exact: true }).fill(edited);
-    await item.getByRole("button", { name: "Save", exact: true }).click();
+    const editForm = page.getByRole("form", { name: "Save" });
+    await editForm.getByRole("textbox", { name: "Activity", exact: true }).fill(edited);
+    await editForm.getByRole("button", { name: "Save", exact: true }).click();
     const after = page.getByTestId("overview-activity").filter({ hasText: edited });
     await expect(after).toBeVisible();
 
