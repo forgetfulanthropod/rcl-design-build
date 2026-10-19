@@ -80,3 +80,30 @@ export function gmailComposeUrl(to: string, subject: string, body: string): stri
   });
   return `https://mail.google.com/mail/?${params.toString()}`;
 }
+
+/** Empty-state copy per Docs section (spec 05 · F4). */
+export const SECTION_EMPTY: Record<DocSectionId, string> = {
+  policy: "No policies yet.",
+  bids: "No bids yet.",
+  invoices: "No invoices yet.",
+  changes: "No RFIs, submittals or change orders yet.",
+};
+
+/** Which optional fields the New document form shows for a kind. */
+export function docFormFields(kind: DocKind, moneyVisible: boolean): { recipient: boolean; amount: boolean } {
+  return {
+    recipient: kind !== "policy",
+    amount: moneyVisible && (kind === "bid" || kind === "invoice" || kind === "change_order"),
+  };
+}
+
+/** "RFI 004 created". */
+export function createdMessage(kind: DocKind, number: number): string {
+  return `${DOC_LABEL[kind]} ${documentNumber(number)} created`;
+}
+
+/** The id that appears in `after` but not in `before` (the document just created). */
+export function newDocumentId(before: { id: string }[], after: { id: string }[]): string | null {
+  const seen = new Set(before.map((doc) => doc.id));
+  return after.find((doc) => !seen.has(doc.id))?.id ?? null;
+}

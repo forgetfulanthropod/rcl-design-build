@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createDocument, fileDocumentReply, listDocuments, sendDocument, setDocumentStatus } from "@/lib/server/fns";
-import { DOC_LABEL, DOC_SECTIONS, DOC_STATUSES, documentNumber, sectionFor, visibleSections, type DocKind, type DocSectionId } from "@/lib/documents";
+import { Drawer } from "vaul";
+import { DOC_LABEL, DOC_SECTIONS, DOC_STATUSES, SECTION_EMPTY, createdMessage, docFormFields, documentNumber, newDocumentId, sectionFor, visibleSections, type DocKind, type DocSectionId } from "@/lib/documents";
 import { BigButton, Button, EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 
 type Board = Awaited<ReturnType<typeof listDocuments>>;
@@ -55,6 +56,43 @@ export function DocumentRail({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+/** md+ (768 px) and up. Phones get the New document drawer; desktop an inline panel. */
+function useDesktop(): boolean {
+  const [desktop, setDesktop] = useState(true);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 768px)");
+    const update = () => setDesktop(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return desktop;
+}
+
+/** The New document form: an inline panel on desktop, a vaul drawer on phones. Esc/Cancel close it. */
+function NewDocument({ desktop, title, onClose, children }: { desktop: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  if (desktop) {
+    return (
+      <section className="rounded-md border border-line bg-surface p-4" data-testid="new-document" aria-label={title}>
+        <h2 className="mb-3 text-lg text-fg">{title}</h2>
+        {children}
+      </section>
+    );
+  }
+  return (
+    <Drawer.Root open onOpenChange={(open) => (open ? undefined : onClose())}>
+      <Drawer.Portal>
+        <Drawer.Overlay className="fixed inset-0 z-40 bg-black/60" />
+        <Drawer.Content className="fixed inset-x-0 bottom-0 z-50 max-h-[90dvh] overflow-y-auto rounded-t-xl border-t border-line bg-surface p-4" data-testid="new-document" aria-describedby={undefined}>
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-line" aria-hidden="true" />
+          <Drawer.Title className="mb-3 text-lg text-fg">{title}</Drawer.Title>
+          {children}
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Drawer.Root>
+  );
+}
+
 export function DocumentsView() {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
@@ -71,6 +109,9 @@ export function DocumentsView() {
   const [note, setNote] = useState("");
   const [replyFrom, setReplyFrom] = useState("");
   const [replyBody, setReplyBody] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState("");
+  const desktop = useDesktop();
 
   useEffect(() => {
     let cancelled = false;
@@ -86,21 +127,18 @@ export function DocumentsView() {
     };
   }, []);
 
-  async function run(work: Promise<Board | { board: Board; gmailUrl: string | null }>) {
+  async function run(work: Promise<Board | { board: Board; gmailUrl: string | null }>): Promise<Board | null> {
     setBusy(true);
     setError("");
     try {
       const result = await work;
-      if ("gmailUrl" in result) {
-        setBoard(result.board);
-        if (result.gmailUrl) window.open(result.gmailUrl, "_blank", "noopener");
-      } else {
-        setBoard(result);
-      }
-      return true;
+      const next = "gmailUrl" in result ? result.board : result;
+      if ("gmailUrl" in result && result.gmailUrl) window.open(result.gmailUrl, "_blank", "noopener");
+      setBoard(next);
+      return next;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save that.");
-      return false;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -116,12 +154,16 @@ export function DocumentsView() {
     return Boolean(board?.canStatus);
   });
   const createKind: DocKind = creatable.includes(kind) ? kind : (creatable[0] ?? "rfi");
+  const fields = docFormFields(createKind, Boolean(board?.moneyVisible));
   const current = board?.documents.find((doc) => doc.id === openId) ?? null;
   const thread = board?.messages.filter((message) => message.documentId === openId) ?? [];
 
   return (
     <div className="mx-auto grid max-w-3xl gap-4" data-testid="documents">
       {error ? <ErrorBanner message={error} /> : null}
+      {created ? (
+        <p role="status" className="rounded-md bg-raised p-3 text-base text-fg" data-testid="doc-created">{created}</p>
+      ) : null}
       {!board ? (
         <Skeleton lines={4} label="Loading documents" />
       ) : current ? (
@@ -136,7 +178,10 @@ export function DocumentsView() {
           setReplyFrom={setReplyFrom}
           replyBody={replyBody}
           setReplyBody={setReplyBody}
-          onBack={() => setOpenId("")}
+          onBack={() => {
+            setOpenId("");
+            setCreated("");
+          }}
           onStatus={(status) => void run(setDocumentStatus({ data: { id: current.id, status } }))}
           onSend={(channel) =>
             void run(sendDocument({ data: { id: current.id, channel, to: email || current.counterpartyEmail, note } })).then((ok) => {
@@ -153,94 +198,132 @@ export function DocumentsView() {
         />
       ) : (
         <>
-          <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Document sections">
-            {sections.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setSection(item.id)}
-                className={`h-11 shrink-0 rounded-md border px-3 text-sm ${active === item.id ? "border-copper bg-copper text-ink" : "border-line text-fg"}`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-sm text-muted" data-testid="doc-counts">
-            {sections
-              .map((item) => {
+          <div className="flex items-end justify-between gap-3 border-b border-line">
+            <div className="-mb-px flex gap-1 overflow-x-auto" role="tablist" aria-label="Document sections">
+              {sections.map((item) => {
                 const count = board.documents.filter((doc) => (item.kinds as readonly string[]).includes(doc.kind)).length;
-                return `${count} ${item.label.toLowerCase()}`;
-              })
-              .join(" · ")}
-          </p>
-          {creatable.length > 0 ? (
-            <form
-              className="grid gap-2 rounded-md border border-line bg-surface p-4"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const dollars = amount.trim() ? Number(amount) : null;
-                void run(
-                  createDocument({
-                    data: {
-                      kind: createKind,
-                      projectId,
-                      title,
-                      body,
-                      counterparty: who,
-                      counterpartyEmail: email,
-                      amount: dollars != null && Number.isFinite(dollars) ? Math.round(dollars) : null,
-                    },
-                  }),
-                ).then((ok) => {
-                  if (!ok) return;
-                  setTitle("");
-                  setBody("");
-                  setWho("");
-                  setAmount("");
-                });
-              }}
-            >
-              <div className="grid grid-cols-2 gap-2">
-                {creatable.map((item) => (
+                const selected = active === item.id;
+                return (
                   <button
-                    key={item}
+                    key={item.id}
                     type="button"
-                    onClick={() => setKind(item)}
-                    className={`h-11 rounded-md border text-sm ${createKind === item ? "border-copper bg-copper text-ink" : "border-line text-fg"}`}
+                    role="tab"
+                    id={`doc-tab-${item.id}`}
+                    aria-selected={selected}
+                    aria-controls="doc-panel"
+                    onClick={() => {
+                      setSection(item.id);
+                      setCreating(false);
+                    }}
+                    className={`inline-flex h-11 shrink-0 items-center gap-2 border-b-2 px-3 text-sm ${selected ? "border-copper text-fg" : "border-transparent text-muted hover:text-fg"}`}
                   >
-                    {DOC_LABEL[item]}
+                    {item.label}
+                    <span className="rounded-full bg-raised px-2 text-xs tabular-nums text-fg" aria-label={`${count} documents`}>
+                      {count}
+                    </span>
                   </button>
-                ))}
-              </div>
-              <label className="text-sm text-muted" htmlFor="doc-title">Title</label>
-              <input id="doc-title" className="field" value={title} onChange={(event) => setTitle(event.target.value)} />
-              <label className="text-sm text-muted" htmlFor="doc-body">What it says</label>
-              <textarea id="doc-body" className="field min-h-20" value={body} onChange={(event) => setBody(event.target.value)} />
-              <label className="text-sm text-muted" htmlFor="doc-job">Job</label>
-              <select id="doc-job" className="field" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-                <option value="">No job</option>
-                {board.jobs.map((job) => (
-                  <option key={job.id} value={job.id}>{job.name}</option>
-                ))}
-              </select>
-              <label className="text-sm text-muted" htmlFor="doc-who">Send to</label>
-              <input id="doc-who" className="field" placeholder="Name" value={who} onChange={(event) => setWho(event.target.value)} />
-              <input className="field" type="email" aria-label="Email" placeholder="name@company.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-              {board.moneyVisible && (createKind === "bid" || createKind === "invoice" || createKind === "change_order") ? (
-                <>
-                  <label className="text-sm text-muted" htmlFor="doc-amount">Amount</label>
-                  <input id="doc-amount" className="field" inputMode="numeric" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} />
-                </>
-              ) : null}
-              <BigButton type="submit" disabled={busy || !title.trim()}>
-                Add {DOC_LABEL[createKind].toLowerCase()}
-              </BigButton>
-            </form>
+                );
+              })}
+            </div>
+            {creatable.length > 0 && !creating ? (
+              <Button type="button" className="mb-1 shrink-0" onClick={() => setCreating(true)}>
+                + New document
+              </Button>
+            ) : null}
+          </div>
+          {creatable.length > 0 && creating ? (
+            <NewDocument
+              desktop={desktop}
+              title={`New ${DOC_LABEL[createKind]}`}
+              onClose={() => setCreating(false)}
+            >
+              <form
+                className="grid gap-2"
+                aria-label={`New ${DOC_LABEL[createKind]}`}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setCreating(false);
+                }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const dollars = amount.trim() ? Number(amount) : null;
+                  const before = board.documents;
+                  void run(
+                    createDocument({
+                      data: {
+                        kind: createKind,
+                        projectId,
+                        title,
+                        body,
+                        counterparty: fields.recipient ? who : "",
+                        counterpartyEmail: fields.recipient ? email : "",
+                        amount: fields.amount && dollars != null && Number.isFinite(dollars) ? Math.round(dollars) : null,
+                      },
+                    }),
+                  ).then((next) => {
+                    if (!next) return;
+                    setTitle("");
+                    setBody("");
+                    setWho("");
+                    setAmount("");
+                    setCreating(false);
+                    const id = newDocumentId(before, next.documents);
+                    const doc = next.documents.find((item) => item.id === id);
+                    if (doc) {
+                      setCreated(createdMessage(doc.kind, doc.number));
+                      setOpenId(doc.id);
+                      setEmail(doc.counterpartyEmail);
+                    }
+                  });
+                }}
+              >
+                <label className="text-sm text-muted" htmlFor="doc-type">Type</label>
+                <select id="doc-type" className="field" value={createKind} autoFocus onChange={(event) => setKind(event.target.value as DocKind)}>
+                  {creatable.map((item) => (
+                    <option key={item} value={item}>{DOC_LABEL[item]}</option>
+                  ))}
+                </select>
+                <label className="text-sm text-muted" htmlFor="doc-job">Job</label>
+                <select id="doc-job" className="field" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+                  <option value="">No job</option>
+                  {board.jobs.map((job) => (
+                    <option key={job.id} value={job.id}>{job.name}</option>
+                  ))}
+                </select>
+                <label className="text-sm text-muted" htmlFor="doc-title">Subject <span aria-hidden="true">*</span></label>
+                <input id="doc-title" className="field" required value={title} onChange={(event) => setTitle(event.target.value)} />
+                <label className="text-sm text-muted" htmlFor="doc-body">Details</label>
+                <textarea id="doc-body" className="field min-h-20" value={body} onChange={(event) => setBody(event.target.value)} />
+                {fields.recipient ? (
+                  <>
+                    <label className="text-sm text-muted" htmlFor="doc-who">Recipient name</label>
+                    <input id="doc-who" className="field" value={who} onChange={(event) => setWho(event.target.value)} />
+                    <label className="text-sm text-muted" htmlFor="doc-email">Recipient email</label>
+                    <input id="doc-email" className="field" type="email" placeholder="name@company.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+                  </>
+                ) : null}
+                {fields.amount ? (
+                  <>
+                    <label className="text-sm text-muted" htmlFor="doc-amount">Amount (USD)</label>
+                    <input id="doc-amount" className="field" inputMode="numeric" placeholder="0" value={amount} onChange={(event) => setAmount(event.target.value)} />
+                  </>
+                ) : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <BigButton type="submit" disabled={busy || !title.trim()}>
+                    Add {DOC_LABEL[createKind].toLowerCase()}
+                  </BigButton>
+                  <Button type="button" tone="ghost" className="h-14" onClick={() => setCreating(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </NewDocument>
           ) : null}
           {docs.length === 0 ? (
-            <EmptyState title="Nothing in this section" body="Policy and change management are on every desk. Bids and invoices stay with the office." />
+            <div id="doc-panel" role="tabpanel" aria-labelledby={`doc-tab-${active}`}>
+              <EmptyState title={SECTION_EMPTY[active]} />
+            </div>
           ) : (
-            <ul className="grid gap-3">
+            <ul className="grid gap-3" id="doc-panel" role="tabpanel" aria-labelledby={`doc-tab-${active}`}>
               {docs.map((doc) => (
                 <li key={doc.id}>
                   <button type="button" onClick={() => { setOpenId(doc.id); setEmail(doc.counterpartyEmail); }} className="w-full rounded-md border border-line bg-surface p-4 text-left">
