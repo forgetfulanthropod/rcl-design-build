@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { DEMO_COMPANY_ID } from "@/lib/demo";
+import { demoReportTimes } from "@/lib/demo-times";
 import { COPY_PATH, COPY_SOURCE, WORKFLOW_PATH, WORKFLOW_SOURCE } from "@/lib/product";
 import { insertMagicLink } from "@/lib/server/magic.server";
 import { DEMO_PHOTOS } from "@/lib/server/demo-photos";
@@ -225,18 +226,12 @@ async function seedReports(sql: Sql, ids: Record<DebugRole, string>, jobIds: str
   for (const [ago, who, job, narrative, photos, lunch] of WEEK) {
     const day = new Date(base.getTime() - ago * 86_400_000);
     const dayStr = day.toISOString().slice(0, 10);
-    const at = (h: number, m: number) => {
-      const d = new Date(`${dayStr}T00:00:00`);
-      d.setHours(h, m, 0, 0);
-      return d.toISOString();
-    };
     const id = randomUUID();
-    const first = at(7, 5 + ((ago * 7) % 25));
-    const last = at(15, 20 + ((ago * 11) % 35));
+    const times = demoReportTimes(dayStr, ago, photos.length);
     await sql`
       insert into daily_reports (id, company_id, user_id, day, project_id, narrative, lunch_minutes, first_edit_at, last_edit_at, submitted_at)
       values (${id}, ${DEMO_COMPANY_ID}, ${ids[who]}, ${dayStr}, ${job >= 0 ? jobIds[job] : null}, ${narrative},
-              ${lunch}, ${first}, ${last}, ${last})
+              ${lunch}, ${times.first}, ${times.last}, ${times.submitted})
     `;
     for (const [n, idx] of photos.entries()) {
       const photo = DEMO_PHOTOS[idx];
@@ -245,7 +240,7 @@ async function seedReports(sql: Sql, ids: Record<DebugRole, string>, jobIds: str
       await sql`
         insert into daily_report_photos (id, report_id, company_id, user_id, mime, bytes, thumb, size_bytes, width, height, taken_at, created_at)
         values (${randomUUID()}, ${id}, ${DEMO_COMPANY_ID}, ${ids[who]}, ${"image/jpeg"}, ${full},
-                ${Buffer.from(photo.thumb, "base64")}, ${full.length}, ${480}, ${360}, ${at(7, 2 + n)}, ${at(7, 3 + n)})
+                ${Buffer.from(photo.thumb, "base64")}, ${full.length}, ${480}, ${360}, ${times.photos[n].taken}, ${times.photos[n].created})
       `;
     }
   }
