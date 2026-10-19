@@ -1,4 +1,5 @@
 import { normalizeRole, type Role } from "./roles.ts";
+import type { Sharing, SharingKey } from "./sharing.ts";
 
 /** Every server action that a role can or cannot take. */
 export const ACTIONS = [
@@ -32,13 +33,18 @@ export const ACTIONS = [
   "doc.create",
   "doc.send",
   "doc.status",
+  "budget.dollars", // budget, actual and change-order $ on Budgets (03); Leads only via lead_budget_dollars
+  "settings.sharing.view",
+  "settings.sharing.edit",
+  "project.sharingReview", // "Mark reviewed" on one job (spec 06)
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
 const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
 const FIELD = new Set<Action>(["rfi.create", "log.create", "workorder.updateOwn", "report.write", "doc.view", "doc.create"]);
-const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write", "doc.send"]);
+// doc.send is not in LABOR: Labor sends only where "Labor can send documents" is on (spec 06).
+const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
   superadmin: ALL,
@@ -85,6 +91,26 @@ export class ForbiddenError extends Error {
 
 export function assertCan(role: string, action: Action): void {
   if (!can(role, action)) throw new ForbiddenError(action);
+}
+
+/**
+ * Sharing settings grant on top of the role matrix and never take anything away (spec 06).
+ * Pay rates (rate.view), money.view, bids and invoices are never granted by a setting.
+ */
+export const SHARING_GRANTS: Partial<Record<Action, { role: Role; key: SharingKey }[]>> = {
+  "budget.dollars": [{ role: "lead", key: "lead_budget_dollars" }],
+  "doc.send": [{ role: "labor", key: "labor_doc_send" }],
+};
+
+export function canWith(role: string, action: Action, sharing: Sharing): boolean {
+  if (can(role, action)) return true;
+  const r = normalizeRole(role);
+  if (!r) return false;
+  return (SHARING_GRANTS[action] ?? []).some((grant) => grant.role === r && sharing[grant.key] === true);
+}
+
+export function assertCanWith(role: string, action: Action, sharing: Sharing): void {
+  if (!canWith(role, action, sharing)) throw new ForbiddenError(action);
 }
 
 /** Roles a given inviter may assign. */

@@ -4,6 +4,7 @@
 // The demo company is a normal company row (DEMO_COMPANY_ID); every query is company-scoped, so it
 // cannot see real companies' data, and its outbound email/SMS is never delivered (see deliverOutbound).
 import { randomUUID } from "node:crypto";
+import { insertProject } from "@/lib/server/sharing.server";
 import { getSql, type Sql } from "@/lib/db";
 import { DEMO_COMPANY_ID } from "@/lib/demo";
 import { COPY_PATH, COPY_SOURCE, WORKFLOW_PATH, WORKFLOW_SOURCE } from "@/lib/product";
@@ -71,10 +72,12 @@ async function seedDemo(sql: Sql) {
   for (const [name, client, address, phase, value, summary] of jobs) {
     const id = randomUUID();
     jobIds.push(id);
-    await sql`
-      insert into projects (id, company_id, name, client_name, address, phase, contract_value, summary)
-      values (${id}, ${DEMO_COMPANY_ID}, ${name}, ${client}, ${address}, ${phase}, ${value}, ${summary})
-    `;
+    // Flagged "Sharing review needed" like every new job (spec 06).
+    await insertProject(
+      sql,
+      { id, companyId: DEMO_COMPANY_ID, name, clientName: client, address, phase, contractValue: value, summary },
+      ids.lead,
+    );
   }
   const orders: [string, string, string, string, string, string, DebugRole | null, number][] = [
     ["Punch list walk-through", "Whitaker family", "418 Whitaker Ln", "Remodel", "Normal", "Scheduled", "labor", 0],

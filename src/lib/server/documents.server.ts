@@ -11,7 +11,9 @@ import {
   statusAfterSend,
   type DocKind,
 } from "@/lib/documents";
-import { assertCan, can } from "@/lib/permissions";
+import { assertCan, assertCanWith, can, canWith } from "@/lib/permissions";
+import { sharingFor, sharingForProjects } from "@/lib/server/sharing.server";
+import { normalizeRole } from "@/lib/roles";
 import { isMailerConfigured, sendEmail } from "@/lib/server/mailer.server";
 import { member } from "@/lib/server/reports.server";
 
@@ -28,6 +30,8 @@ export type DocCard = {
   counterpartyEmail: string;
   amount: number | null;
   updatedAt: string;
+  /** Per document (spec 06): Labor can send only where "Labor can send documents" is on for its job. */
+  canSend: boolean;
 };
 
 export type DocMessage = {
@@ -50,7 +54,8 @@ export type DocBoard = {
   jobs: { id: string; name: string }[];
   moneyVisible: boolean;
   canCreate: boolean;
-  canSend: boolean;
+  /** Point-of-use hint where a setting (not the role) keeps Send off: Labor only. */
+  sendOffHint: string;
   canStatus: boolean;
   canApproveMoney: boolean;
   resendReady: boolean;
@@ -117,8 +122,10 @@ async function board(sql: Sql, companyId: string, role: string): Promise<DocBoar
   const jobs = await sql<{ id: string; name: string }>`
     select id, name from projects where company_id = ${companyId} and archived = false order by name asc
   `;
-  const documents = docs
-    .filter((row) => isDocKind(text(row.kind)) && (money || !isMoneyDoc(text(row.kind) as DocKind)))
+  const shown = docs.filter((row) => isDocKind(text(row.kind)) && (money || !isMoneyDoc(text(row.kind) as DocKind)));
+  // One query for every job's effective settings (no N+1); "" is the company value for no-job docs.
+  const sharing = await sharingForProjects(sql, companyId, shown.map((row) => text(row.project_id)));
+  const documents = shown
     .map((row) => ({
       id: text(row.id),
       kind: text(row.kind) as DocKind,
@@ -132,6 +139,7 @@ async function board(sql: Sql, companyId: string, role: string): Promise<DocBoar
       counterpartyEmail: text(row.counterparty_email),
       amount: money && row.amount != null ? Number(row.amount) : null,
       updatedAt: iso(row.updated_at),
+      canSend: canWith(role, "doc.send", sharing.get(text(row.project_id)) ?? sharing.get("")!),
     }));
   const visible = new Set(documents.map((doc) => doc.id));
   return {
@@ -154,7 +162,7 @@ async function board(sql: Sql, companyId: string, role: string): Promise<DocBoar
     jobs: jobs.map((job) => ({ id: text(job.id), name: text(job.name) })),
     moneyVisible: money,
     canCreate: can(role, "doc.create"),
-    canSend: can(role, "doc.send"),
+    sendOffHint: normalizeRole(role) === "labor" ? "Sending is off for this job." : "",
     canStatus: can(role, "doc.status"),
     canApproveMoney: can(role, "co.status"),
     resendReady: isMailerConfigured(),
@@ -266,10 +274,10 @@ export async function sendDocument(
   input: { id: string; channel: string; to: string; note: string },
 ): Promise<{ board: DocBoard; gmailUrl: string | null }> {
   const { sql, me } = await open(userId);
-  assertCan(me.role, "doc.send");
   if (input.channel !== "resend" && input.channel !== "gmail") throw new Error("Pick Resend or Gmail.");
   const channel = input.channel;
   const doc = await ownDoc(sql, me.companyId, input.id);
+  assertCanWith(me.role, "doc.send", await sharingFor(sql, me.companyId, doc.project_id ? text(doc.project_id) : null));
   const kind = text(doc.kind);
   if (!isDocKind(kind)) throw new Error("Unknown document.");
   officeOnly(me.role, kind);
@@ -317,8 +325,8 @@ export async function fileDocumentReply(
   input: { id: string; channel: "resend" | "gmail"; fromEmail: string; body: string },
 ): Promise<DocBoard> {
   const { sql, me } = await open(userId);
-  assertCan(me.role, "doc.send");
   const doc = await ownDoc(sql, me.companyId, input.id);
+  assertCanWith(me.role, "doc.send", await sharingFor(sql, me.companyId, doc.project_id ? text(doc.project_id) : null));
   const kind = text(doc.kind);
   if (!isDocKind(kind)) throw new Error("Unknown document.");
   officeOnly(me.role, kind);

@@ -233,7 +233,12 @@ test("attention: AI summary lists items with citations, is cached, and links to 
   // Citation jumps to the report.
   const cite = list.getByRole("button", { name: /From .+'s report/ }).first();
   const who = ((await cite.textContent()) ?? "").match(/From (.+)'s report/)![1];
-  await cite.click();
+  // The pinned sharing-review section makes Attention tall on a phone; Playwright's scroll then
+  // parks the citation under the fixed bottom nav. scroll-mb-24 helps, and a DOM click is reliable.
+  await cite.evaluate((el: HTMLElement) => {
+    el.scrollIntoView({ block: "center", inline: "nearest" });
+    el.click();
+  });
   await expect(nav(page, "Reports")).toHaveAttribute("aria-current", "page");
   await expect(page.locator("article.border-copper")).toContainText(who);
   await ctx.close();
@@ -244,4 +249,47 @@ test("attention: AI summary lists items with citations, is cached, and links to 
   await expect(desk.page.getByText(/^Read 1\d reports/)).toBeVisible({ timeout: 30_000 });
   await desk.page.screenshot({ path: `${OUT}/desktop-owner-attention.png`, fullPage: false });
   await desk.ctx.close();
+});
+
+test("sharing (spec 06): Owner turns Labor sending on for Whitaker; Luis sees Send on a Whitaker RFI but not on an Oak Street one", async ({ browser }) => {
+  type Fn = (a: { data?: unknown }) => Promise<unknown>;
+  const fn = (page: Page, name: string, data?: unknown) =>
+    page.evaluate(
+      async ([n, d]) => ((await import("/src/lib/server/fns.ts")) as unknown as Record<string, Fn>)[n as string]({ data: d }),
+      [name, data] as const,
+    );
+
+  // Luis files an Oak Street RFI (the demo's Whitaker RFI is already his).
+  const luis = await as(browser, "labor", DESKTOP);
+  const board = (await fn(luis.page, "listDocuments")) as { jobs: { id: string; name: string }[] };
+  const oak = board.jobs.find((j) => j.name === "Oak Street duplex addition")!;
+  await fn(luis.page, "createDocument", { kind: "rfi", projectId: oak.id, title: "Rear stair landing height", body: "", counterparty: "", counterpartyEmail: "", amount: null });
+
+  // Owner: override on Whitaker, then mark Whitaker (only) reviewed through the dialog.
+  const owner = await as(browser, "owner", DESKTOP);
+  await owner.page.getByRole("button", { name: /^Settings/ }).click();
+  await owner.page.getByRole("tab", { name: "Projects" }).click();
+  await owner.page.getByRole("button", { name: "Review Whitaker kitchen remodel" }).click();
+  await owner.page.getByTestId("project-labor_doc_send").getByRole("radio", { name: "On" }).click();
+  await expect(owner.page.getByTestId("project-labor_doc_send")).toContainText("Applies after review");
+  await owner.page.getByTestId("review-banner").getByRole("button", { name: "Mark reviewed" }).click();
+  await owner.page.getByRole("dialog").getByRole("button", { name: "Mark reviewed" }).click();
+  await expect(owner.page.getByTestId("reviewed-line")).toBeVisible();
+  await owner.ctx.close();
+
+  const openDoc = async (title: string) => {
+    await nav(luis.page, "Docs").click();
+    await luis.page.getByRole("button", { name: "Change management", exact: true }).click();
+    await luis.page.getByRole("button", { name: new RegExp(title) }).click();
+  };
+  await luis.page.reload();
+  await openDoc("Pocket door at the pantry");
+  await expect(luis.page.getByRole("button", { name: /Send with Resend|Queue on Resend/ })).toBeVisible();
+  await expect(luis.page.getByRole("button", { name: "Open in Gmail" })).toBeVisible();
+  await expect(luis.page.getByTestId("send-off")).toHaveCount(0);
+  await luis.page.getByRole("button", { name: "All documents" }).click();
+  await openDoc("Rear stair landing height");
+  await expect(luis.page.getByRole("button", { name: /Send with Resend|Queue on Resend/ })).toHaveCount(0);
+  await expect(luis.page.getByTestId("send-off")).toHaveText("Sending is off for this job.");
+  await luis.ctx.close();
 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, ClipboardList, Files, History, ListChecks, NotebookPen, ShieldCheck, Users } from "lucide-react";
+import { AlertTriangle, ClipboardList, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
-import { completeSetup, loadDesk } from "@/lib/server/fns";
+import { completeSetup, getSharingReviewCount, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
@@ -12,11 +12,12 @@ import { AttentionView, MyReports, ReportsReview } from "@/components/reports-vi
 import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
 import { SafetyView } from "@/components/safety-view";
 import { DocumentsView } from "@/components/documents-view";
+import { SharingSettings } from "@/components/sharing-settings";
 import { can, type NavId } from "@/lib/permissions";
 import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
 
 type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
-type View = NavId | "team";
+type View = NavId | "team" | "settings";
 
 // Slimmed to daily reports. The older desk views (Desk home, Jobs, Site/dispatch board, work orders,
 // RFIs, change orders, milestones, contract values, Log, Foreman) are hidden from navigation; their
@@ -36,6 +37,9 @@ export function DeskApp() {
   const [error, setError] = useState("");
   const [view, setView] = useState<View | "">("");
   const [focus, setFocus] = useState({ id: "", day: "" });
+  const [sharingProject, setSharingProject] = useState("");
+  const [reviewBadge, setReviewBadge] = useState(0);
+  const [badgeTick, setBadgeTick] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const online = useOnline();
 
@@ -53,6 +57,20 @@ export function DeskApp() {
       cancelled = true;
     };
   }, [attempt]);
+
+  // Header badge: how many jobs still need a sharing review. Refreshed whenever the view changes.
+  const role = data && !data.needsSetup ? data.profile.role : "";
+  const sharingPage = view === "settings" ? sharingProject || "list" : "";
+  useEffect(() => {
+    if (!role || !can(role, "settings.sharing.view")) return;
+    let cancelled = false;
+    getSharingReviewCount()
+      .then((n) => !cancelled && setReviewBadge(n))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [role, view, sharingPage, badgeTick]);
 
   async function commit(work: Promise<DeskResult>) {
     setError("");
@@ -91,8 +109,20 @@ export function DeskApp() {
     .map((id) => NAV.find((item) => item.id === id))
     .filter((item): item is (typeof NAV)[number] => Boolean(item));
   const canTeam = can(ready.profile.role, "crew.invite");
-  const current: View = view === "team" && canTeam ? "team" : nav.some((item) => item.id === view) ? (view as NavId) : (nav[0]?.id ?? "today");
-  const label = current === "team" ? "Team" : NAV.find((item) => item.id === current)?.label;
+  const canSettings = can(ready.profile.role, "settings.sharing.view");
+  const current: View =
+    view === "team" && canTeam
+      ? "team"
+      : view === "settings" && canSettings
+        ? "settings"
+        : nav.some((item) => item.id === view)
+          ? (view as NavId)
+          : (nav[0]?.id ?? "today");
+  const label = current === "team" ? "Team" : current === "settings" ? "Sharing settings" : NAV.find((item) => item.id === current)?.label;
+  const openSharing = (projectId = "") => {
+    setSharingProject(projectId);
+    setView("settings");
+  };
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
@@ -126,6 +156,21 @@ export function DeskApp() {
                 <Users className="size-4" aria-hidden="true" /> Team
               </button>
             ) : null}
+            {canSettings ? (
+              <button
+                type="button"
+                onClick={() => openSharing()}
+                aria-label={reviewBadge ? `Settings, ${reviewBadge} sharing review${reviewBadge === 1 ? "" : "s"} needed` : "Settings"}
+                className={`relative inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "settings" ? "text-copper" : "text-muted"}`}
+              >
+                <Settings className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Settings</span>
+                {reviewBadge ? (
+                  <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-copper px-1 text-xs font-semibold text-ink" data-testid="settings-badge">
+                    {reviewBadge}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
             <UserButton />
           </div>
         </header>
@@ -145,6 +190,7 @@ export function DeskApp() {
                 setFocus({ id, day });
                 setView("reports");
               }}
+              onReviewSharing={canSettings ? (projectId) => openSharing(projectId) : undefined}
             />
           ) : null}
           {current === "activities" ? (
@@ -157,6 +203,7 @@ export function DeskApp() {
           {current === "safety" ? <SafetyView /> : null}
           {current === "docs" ? <DocumentsView /> : null}
           {current === "team" ? <CrewView data={ready} commit={commit} /> : null}
+          {current === "settings" ? <SharingSettings projectId={sharingProject} onOpenProject={setSharingProject} onChanged={() => setBadgeTick((n) => n + 1)} /> : null}
         </div>
       </div>
       <nav

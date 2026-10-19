@@ -635,3 +635,115 @@ export const fileDocumentReply = createServerFn({ method: "POST" })
     return run(context.userId, data);
   });
 
+
+// ---- Sharing settings (spec 06 rev 3). Owner, Admin and superadmin only; checked in sharing.server. ----
+
+function sharingKeyArg(value: unknown): string {
+  return required(value, 40, "Setting");
+}
+function onOff(value: unknown): boolean {
+  if (typeof value !== "boolean") throw new Error("Pick On or Off.");
+  return value;
+}
+function onOffInherit(value: unknown): boolean | null {
+  if (value === null) return null;
+  return onOff(value);
+}
+
+export const getSharingOverview = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getSharingOverview: run } = await import("./sharing.server");
+    return run(context.userId);
+  });
+
+export const getSharingProject = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string }) => ({ projectId: required(input?.projectId, 80, "Job") }))
+  .handler(async ({ context, data }) => {
+    const { getSharingProject: run } = await import("./sharing.server");
+    return run(context.userId, data);
+  });
+
+export const getSharingReviewCount = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { reviewCount } = await import("./sharing.server");
+    return reviewCount(context.userId);
+  });
+
+export const listSharingReviewQueue = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { listReviewQueue } = await import("./sharing.server");
+    return listReviewQueue(context.userId);
+  });
+
+export const setCompanySharing = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { key: string; value: boolean; note?: string }) => ({
+    key: sharingKeyArg(input?.key),
+    value: onOff(input?.value),
+    note: optional(input?.note, 500),
+  }))
+  .handler(async ({ context, data }) => {
+    const { setCompanySetting } = await import("./sharing.server");
+    return setCompanySetting(context.userId, data);
+  });
+
+export const setProjectSharing = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string; key: string; value: boolean | null; note?: string }) => ({
+    projectId: required(input?.projectId, 80, "Job"),
+    key: sharingKeyArg(input?.key),
+    value: onOffInherit(input?.value),
+    note: optional(input?.note, 500),
+  }))
+  .handler(async ({ context, data }) => {
+    const { setProjectSetting } = await import("./sharing.server");
+    return setProjectSetting(context.userId, data);
+  });
+
+export const getReviewPreview = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string }) => ({ projectId: required(input?.projectId, 80, "Job") }))
+  .handler(async ({ context, data }) => {
+    const { getReviewPreview: run } = await import("./sharing.server");
+    return run(context.userId, data);
+  });
+
+/** Clears the "Sharing review needed" flag on ONE job. There is no bulk version. */
+export const markProjectReviewed = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string; expectedSnapshotHash?: string }) => ({
+    projectId: required(input?.projectId, 80, "Job"),
+    expectedSnapshotHash: optional(input?.expectedSnapshotHash, 16) || undefined,
+  }))
+  .handler(async ({ context, data }) => {
+    const { markProjectReviewed: run } = await import("./sharing.server");
+    return run(context.userId, data);
+  });
+
+export const requestSharingReview = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string; note?: string }) => ({
+    projectId: required(input?.projectId, 80, "Job"),
+    note: optional(input?.note, 500),
+  }))
+  .handler(async ({ context, data }) => {
+    const { requestReviewAgain } = await import("./sharing.server");
+    return requestReviewAgain(context.userId, data);
+  });
+
+export const listSharingAudit = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId?: string; scope?: string; key?: string; person?: string }) => ({
+    projectId: optional(input?.projectId, 80),
+    scope: optional(input?.scope, 80),
+    key: optional(input?.key, 40),
+    person: optional(input?.person, 80),
+  }))
+  .handler(async ({ context, data }) => {
+    const { listAudit } = await import("./sharing.server");
+    return listAudit(context.userId, data);
+  });

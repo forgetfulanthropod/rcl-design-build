@@ -344,7 +344,7 @@ function DocumentDetail({
           </article>
         ))}
       </section>
-      {board.canSend ? (
+      {doc.canSend ? (
         <form className="grid gap-2 rounded-md border border-line bg-surface p-4" onSubmit={(event) => event.preventDefault()}>
           <label className="text-sm text-muted" htmlFor="send-to">To</label>
           <input id="send-to" className="field" type="email" value={sendTo} onChange={(event) => setSendTo(event.target.value)} />
@@ -364,6 +364,10 @@ function DocumentDetail({
             File reply
           </Button>
         </form>
+      ) : board.sendOffHint ? (
+        <p className="rounded-md border border-line bg-surface p-4 text-base text-muted" data-testid="send-off">
+          {board.sendOffHint}
+        </p>
       ) : null}
     </div>
   );
