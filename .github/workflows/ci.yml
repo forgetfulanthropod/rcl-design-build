@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Typecheck, lint, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        # No DATABASE_URL here, so the deploy-time migrator skips; nothing is deployed.
+        run: npm run build
+
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Embedded PGLite database, no mail/SMS keys, debug persona sign-in on, fake AI endpoint.
+      DATABASE_URL: ""
+      DEBUG_LOGIN: "true"
+      DEV_LINK_PREVIEW: "true"
+      XAI_API_KEY: test-fake
+      XAI_BASE_URL: http://127.0.0.1:8099
+      E2E_CHROME_CHANNEL: chrome
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Start the fake xAI endpoint
+        run: nohup node e2e/fake-xai.mjs 8099 > fake-xai.log 2>&1 &
+      - name: Run Playwright (starts the dev server itself)
+        run: npx playwright test --reporter=list
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            fake-xai.log
+          retention-days: 7

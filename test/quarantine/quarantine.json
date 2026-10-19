@@ -1,0 +1,23 @@
+{
+  "$comment": "Unit tests skipped in `npm test`. Each entry needs a reason and a tracking issue. These are App Builder template tests under scripts/ (platform files we don't edit). They assert the template's defaults, which this app deliberately changed (sign-in on, custom share card, auth migration in migrations/), or read .grok/skills/, which is gitignored and absent in a clean checkout. They fail identically on main at ed0a42c.",
+  "issue": "TRACKING_ISSUE_URL",
+  "tests": [
+    { "file": "scripts/brand-check.test.mjs", "name": "SKILL.md and AGENTS.md name the marker path and bound this script uses", "reason": "Reads .grok/skills/og/SKILL.md, which is gitignored and not in the repo." },
+    { "file": "scripts/brand-check.test.mjs", "name": "the sections that own the brand-task prohibition never affirm a wait", "reason": "Reads .grok/skills/og/SKILL.md, which is gitignored and not in the repo." },
+    { "file": "scripts/brand-check.test.mjs", "name": "SKILL.md tells the pass to self-check with the flag this CLI accepts", "reason": "Reads .grok/skills/og/SKILL.md, which is gitignored and not in the repo." },
+    { "file": "scripts/write-atomic.test.mjs", "name": "every hand-over the og skill prints is one this script accepts", "reason": "Reads .grok/skills/og/references/, which is gitignored and not in the repo." },
+    { "file": "scripts/check-auth-invariant.test.mjs", "name": "the build side resolves the template's shipped app-env", "reason": "Asserts the template ships with sign-in off. This app turns sign-in on." },
+    { "file": "scripts/with-app-env.test.mjs", "name": "the template ships auth off", "reason": "Asserts the template ships with sign-in off. This app turns sign-in on." },
+    { "file": "scripts/with-app-env.test.mjs", "name": "the wrapped command runs with the app env applied", "reason": "Expects VITE_AUTH_ENABLED=false from the template app-env. This app's app-env doesn't set it." },
+    { "file": "scripts/with-app-env.test.mjs", "name": "the CLI still runs when invoked through a symlinked path", "reason": "Expects VITE_AUTH_ENABLED=false from the template app-env. This app's app-env doesn't set it." },
+    { "file": "scripts/migration-plan.test.mjs", "name": "the auth schema ships outside the globbed directory", "reason": "Asserts migrations/ has no auth schema. This app uses sign-in, so migrations/0001_auth.sql is applied on purpose." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "platform chrome overwrites share-card metas and always sets og:title", "reason": "Asserts the template's default share card. This app ships public/og.jpg and its own title." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "published grok.me slug is still a title fallback", "reason": "Asserts the template's default share card. This app ships public/og.jpg and its own title." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "emits og:image for a public host and prefers a custom card", "reason": "Asserts the template's default share card. This app ships public/og.jpg and its own title." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "placeholder og:image appends site.color when it is 6-digit hex", "reason": "Asserts the template's placeholder share card. This app ships public/og.jpg." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "document title entities are not double-escaped on og:title", "reason": "Asserts the template's default title. This app sets its own title." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "injects into documents with no head element", "reason": "Asserts the template's default share card. This app ships public/og.jpg and its own title." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "streaming injector matches </HEAD> case-insensitively", "reason": "Asserts the template's default share card. This app ships public/og.jpg and its own title." },
+    { "file": "scripts/grok-pwa-plugin.test.mjs", "name": "uses the app name in the injected title tag", "reason": "Asserts the template's default title. This app sets its own title." }
+  ]
+}
