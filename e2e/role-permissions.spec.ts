@@ -156,6 +156,9 @@ test("F2c (lead): can still open an RFI from Docs", async ({ browser }) => {
   // #17: create form is behind "+ New document", not open on the tab alone.
   await page.getByRole("button", { name: "+ New document" }).click();
   await expect(page.locator("#doc-title")).toBeVisible();
-  expect(await call(page, "createDocument", { kind: "rfi", projectId: "", title: "Which grout color?", body: "", counterparty: "", counterpartyEmail: "", amount: null })).toBe("ok");
+  // F3: RFI requires a job — use the form's current job (preselected).
+  const projectId = await page.locator("#doc-job").inputValue();
+  expect(projectId, "lead form should preselect a job").not.toBe("");
+  expect(await call(page, "createDocument", { kind: "rfi", projectId, title: "Which grout color?", body: "", counterparty: "", counterpartyEmail: "", amount: null })).toBe("ok");
   await ctx.close();
 });
