@@ -56,9 +56,13 @@ test("non-.sql entries are dropped (readdir also yields the auth/ directory)", (
   assert.deepEqual(pendingMigrations(["auth", "README.md"], []), []);
 });
 
-test("the auth schema ships outside the globbed directory", () => {
+test("the auth schema source stays outside the globbed directory, and sign-in copies it in", () => {
+  // The template ships migrations/ empty with the opt-in schema under migrations/auth/.
+  // This app has sign-in on, so migrations/0001_auth.sql is the applied copy, first in order.
   const migrationsDir = join(projectRoot(), "migrations");
-  assert.deepEqual(pendingMigrations(readdirSync(migrationsDir), []), []);
+  const plan = pendingMigrations(readdirSync(migrationsDir), []).map((m) => m.name);
+  assert.equal(plan[0], "0001_auth.sql");
+  assert.ok(plan.every((name) => !name.includes("/")), "nothing under migrations/auth/ is globbed");
   assert.ok(readdirSync(join(migrationsDir, "auth")).includes("0001_auth.sql"));
 });
 
