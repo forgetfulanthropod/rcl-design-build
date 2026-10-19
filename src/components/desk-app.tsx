@@ -9,7 +9,7 @@ import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
 import { can, type NavId } from "@/lib/permissions";
-import { NOT_ON_DESK, VIEW_LABEL, VIEW_PATH, canOpen, defaultPath, pageTitle, viewForPath, type DeskView } from "@/lib/desk-routes";
+import { VIEW_LABEL, VIEW_PATH, canOpen, deskRedirect, pageTitle, viewForPath, type DeskView } from "@/lib/desk-routes";
 import { SUPER_ADMIN_PHONE_DISPLAY, roleLabel, samePhone } from "@/lib/roles";
 
 type View = DeskView;
@@ -40,26 +40,33 @@ export function DeskApp({ children }: { children?: ReactNode }) {
   const [recordTitle, setRecordTitle] = useState("");
   const online = useOnline();
   const navigate = useNavigate();
-  // The view comes from the route that is actually rendered (the last match), not the
-  // in-flight location: during a redirect the old route is still on screen for a frame.
-  const pathname = useRouterState({ select: (state) => state.matches[state.matches.length - 1]?.pathname ?? state.location.pathname });
-  const view = viewForPath(pathname);
+  // Two paths matter (spec 05 · F1):
+  // - `target`: where the router is (or is heading). The nav, header and title follow it, so a tab
+  //   click shows at once even while a cold route chunk is still loading.
+  // - `rendered`: the route actually on screen (the last match). While it differs from the target
+  //   view, the old view is stale and is not shown, so a click can't land on it and replace the
+  //   in-flight navigation (e.g. Reports' "7 days" filter undoing an Attention click).
+  // Redirects only run once the router has settled (status "idle"), on the settled location.
+  const settled = useRouterState({ select: (state) => state.status === "idle" });
+  const target = useRouterState({ select: (state) => state.location.pathname });
+  const rendered = useRouterState({ select: (state) => state.matches[state.matches.length - 1]?.pathname ?? state.location.pathname });
+  const view = viewForPath(target);
+  const renderedView = viewForPath(rendered);
   const role = data && !data.needsSetup ? data.profile.role : "";
   const allowed = Boolean(role && view && canOpen(role, view));
 
   useEffect(() => {
-    if (!role) return;
-    if (!view) {
-      void navigate({ to: defaultPath(role), replace: true });
-    } else if (!canOpen(role, view)) {
-      setNotice(NOT_ON_DESK);
-      void navigate({ to: defaultPath(role), replace: true });
-    }
-  }, [role, view, navigate]);
+    // Never during a pending transition: only a settled "/" (or a page this role can't open)
+    // goes to the role's first view, so a nav click right after sign-in is never overwritten.
+    const next = deskRedirect(role, target, settled);
+    if (!next) return;
+    if (next.notice) setNotice(next.notice);
+    void navigate({ to: next.to, replace: true });
+  }, [role, settled, target, navigate]);
 
   useEffect(() => {
     setRecordTitle("");
-  }, [pathname]);
+  }, [target]);
 
   useEffect(() => {
     if (view && allowed) document.title = pageTitle(view, recordTitle);
@@ -186,7 +193,11 @@ export function DeskApp({ children }: { children?: ReactNode }) {
           </p>
         ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          <DeskContext.Provider value={{ ready, commit, setRecordTitle }}>{children}</DeskContext.Provider>
+          {renderedView === current ? (
+            <DeskContext.Provider value={{ ready, commit, setRecordTitle }}>{children}</DeskContext.Provider>
+          ) : (
+            <Skeleton lines={4} label={`Opening ${label}`} />
+          )}
         </div>
       </div>
       <nav

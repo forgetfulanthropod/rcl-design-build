@@ -55,6 +55,19 @@ export function defaultPath(role: string): string {
 
 export const NOT_ON_DESK = "That page isn't on your desk.";
 
+/**
+ * Where the desk shell should send this role, or null to stay. Only a settled router redirects
+ * (never during a pending transition, so a nav click right after sign-in is not overwritten),
+ * and only from "/" (or another non-desk path) or a view this role can't open.
+ */
+export function deskRedirect(role: string, pathname: string, settled: boolean): { to: string; notice: string } | null {
+  if (!role || !settled) return null;
+  const view = viewForPath(pathname);
+  if (!view) return { to: defaultPath(role), notice: "" };
+  if (!canOpen(role, view)) return { to: defaultPath(role), notice: NOT_ON_DESK };
+  return null;
+}
+
 /** "<Record> · <View> · RCL", or "<View> · RCL" without a record. */
 export function pageTitle(view: DeskView, record?: string | null): string {
   return [record?.trim(), VIEW_LABEL[view], "RCL"].filter(Boolean).join(" · ");

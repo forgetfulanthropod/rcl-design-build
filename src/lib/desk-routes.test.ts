@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canOpen, defaultPath, pageTitle, safeNext, viewForPath, viewsFor } from "./desk-routes.ts";
+import { NOT_ON_DESK, canOpen, defaultPath, deskRedirect, pageTitle, safeNext, viewForPath, viewsFor } from "./desk-routes.ts";
 
 test("deep links: every desk path maps to its view", () => {
   assert.equal(viewForPath("/reports"), "reports");
@@ -43,4 +43,23 @@ test("deep links: ?next= is same-origin only and never loops back to sign-in", (
   for (const bad of ["https://evil.example/x", "//evil.example", "/\\evil", "javascript:alert(1)", "/login?next=/x", "/m/token", "/api/auth/x", "", null, undefined]) {
     assert.equal(safeNext(bad as string), "/", String(bad));
   }
+});
+
+test("deep links: the shell redirects only once the router has settled", () => {
+  // Pending transition (e.g. a nav click right after sign-in): never redirect, even from "/".
+  assert.equal(deskRedirect("owner", "/", false), null);
+  assert.equal(deskRedirect("owner", "/team", false), null);
+  assert.equal(deskRedirect("labor", "/attention", false), null);
+  // Settled on "/": the role's first view, no notice.
+  assert.deepEqual(deskRedirect("owner", "/", true), { to: "/reports", notice: "" });
+  assert.deepEqual(deskRedirect("lead", "/", true), { to: "/today", notice: "" });
+  // Settled on a view the role can't open: first view with the notice.
+  assert.deepEqual(deskRedirect("labor", "/attention", true), { to: "/today", notice: NOT_ON_DESK });
+  // Settled on a view the role can open (including the tab just clicked): stay.
+  assert.equal(deskRedirect("owner", "/attention", true), null);
+  assert.equal(deskRedirect("lead", "/activities", true), null);
+  assert.equal(deskRedirect("lead", "/mine", true), null);
+  assert.equal(deskRedirect("owner", "/reports/abc", true), null);
+  // Desk not loaded yet: no role, no redirect.
+  assert.equal(deskRedirect("", "/", true), null);
 });
