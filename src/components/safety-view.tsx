@@ -161,7 +161,7 @@ export function SafetyView() {
                 ))}
               </ul>
             ) : null}
-            {!desk.canWriteJsa && desk.jsas.length === 0 ? (
+            {!desk.canWriteJsa ? (
               <p className="mt-3 text-base text-fg" data-testid="jsa-readonly">Your lead records today's job safety analysis.</p>
             ) : null}
             {desk.canWriteJsa ? (
