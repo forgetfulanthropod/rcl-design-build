@@ -47,12 +47,13 @@ test.beforeAll(async ({ browser }) => {
   await ctx.close();
 });
 
-for (const role of ["owner", "admin"] as const) {
-  test(`attention (${role}): first read shows progress, a cached read is instant and skips the AI`, async ({ browser }) => {
+// Each role uses its own range so neither starts from the other's cached summary.
+for (const [role, range] of [["owner", "7 days"], ["admin", "Yesterday"]] as const) {
+  test(`attention (${role}, ${range}): first read shows progress, a cached read is instant and skips the AI`, async ({ browser }) => {
     const { ctx, page } = await as(browser, role);
     const seen = await slowFreshCalls(page, 3_000);
     await nav(page, "Attention").click();
-    await page.getByRole("button", { name: "7 days", exact: true }).click();
+    await page.getByRole("button", { name: range, exact: true }).click();
     // Fresh work: a progress bar while it runs, then the generated summary.
     await expect(page.getByRole("progressbar", { name: "Writing a fresh summary" })).toBeVisible();
     await expect(page.getByText(/^Read \d+ reports? · (generated|cached) /)).toBeVisible({ timeout: 30_000 });
@@ -63,7 +64,7 @@ for (const role of ["owner", "admin"] as const) {
     const freshBefore = seen.fresh;
     await nav(page, "Attention").click();
     const started = Date.now();
-    await page.getByRole("button", { name: "7 days", exact: true }).click();
+    await page.getByRole("button", { name: range, exact: true }).click();
     await expect(page.getByText(/^Read \d+ reports? · cached /)).toBeVisible({ timeout: 2_500 });
     expect(Date.now() - started).toBeLessThan(2_500);
     await expect(page.getByRole("progressbar")).toHaveCount(0);
