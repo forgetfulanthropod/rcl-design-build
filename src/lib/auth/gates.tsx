@@ -112,7 +112,7 @@ export function UserButton() {
           {label.charAt(0).toUpperCase()}
         </span>
       )}
-      <span className="max-w-[6.5rem] truncate text-sm font-medium sm:max-w-[9rem]">{label}</span>
+      <span className="hidden max-w-[9rem] truncate text-sm font-medium sm:inline">{label}</span>
       {authEnabled && !gateSession && (
         <button
           type="button"

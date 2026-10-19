@@ -114,3 +114,51 @@ for (const role of ["owner", "admin"] as const) {
     });
   }
 }
+
+// Header title must keep room on phones (MGMT regression after shrink-0 on the right cluster).
+const ALL_ROLES = ["owner", "admin", "lead", "labor", "subcontractor"] as const;
+const ALL_LABEL: Record<(typeof ALL_ROLES)[number], string> = {
+  owner: "Owner",
+  admin: "Admin",
+  lead: "Lead",
+  labor: "Labor",
+  subcontractor: "Subcontractor",
+};
+
+async function asRole(browser: Browser, role: (typeof ALL_ROLES)[number], width: number, height: number) {
+  const ctx = await browser.newContext({
+    viewport: { width, height },
+    isMobile: width < 768,
+    hasTouch: width < 768,
+  });
+  const page = await ctx.newPage();
+  await page.goto("/login");
+  await page.getByTestId("debug-login").getByRole("button", { name: ALL_LABEL[role], exact: true }).click();
+  await page.waitForURL((u) => !u.pathname.startsWith("/login") && !u.pathname.startsWith("/m/"), { timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
+  return { ctx, page };
+}
+
+for (const role of ALL_ROLES) {
+  for (const { name, width, height } of [
+    { name: "phone", width: 390, height: 844 },
+    { name: "tablet", width: 768, height: 1024 },
+  ] as const) {
+    test(`${role} @ ${name} (${width}): header title is not truncated`, async ({ browser }) => {
+      const { ctx, page } = await asRole(browser, role, width, height);
+      const title = page.locator("header .font-display").first();
+      await expect(title).toBeVisible();
+      const fit = await title.evaluate((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        text: (el.textContent || "").trim(),
+      }));
+      expect(fit.text.length, `title text too short: "${fit.text}"`).toBeGreaterThan(1);
+      expect(
+        fit.scrollWidth,
+        `header title "${fit.text}" truncated: scrollWidth ${fit.scrollWidth} > clientWidth ${fit.clientWidth}`,
+      ).toBeLessThanOrEqual(fit.clientWidth);
+      await ctx.close();
+    });
+  }
+}
