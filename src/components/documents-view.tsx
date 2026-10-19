@@ -133,6 +133,19 @@ export function DocumentsView({
   const [created, setCreated] = useState("");
   const desktop = useDesktop();
 
+  // F1: opening a new doc navigates to /docs/$docId and remounts — keep the "RFI 00N created" flash.
+  useEffect(() => {
+    try {
+      const msg = sessionStorage.getItem("rcl.docCreated");
+      if (msg) {
+        setCreated(msg);
+        sessionStorage.removeItem("rcl.docCreated");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     listDocuments()
@@ -304,7 +317,13 @@ export function DocumentsView({
                     const id = newDocumentId(before, next.documents);
                     const doc = next.documents.find((item) => item.id === id);
                     if (doc) {
-                      setCreated(createdMessage(doc.kind, doc.number));
+                      const msg = createdMessage(doc.kind, doc.number);
+                      setCreated(msg);
+                      try {
+                        sessionStorage.setItem("rcl.docCreated", msg);
+                      } catch {
+                        /* ignore */
+                      }
                       setOpenId(doc.id);
                       setEmail(doc.counterpartyEmail);
                     }

@@ -185,13 +185,31 @@ export function AttentionView({
   onRange?: (range: { from: string; to: string }) => void;
 }) {
   const today = localDay();
-  const [from, setFrom] = useState(initial?.from || today);
-  const [to, setTo] = useState(initial?.to || today);
+  // F1 remounts on every nav. Remember the last range so Reports → Attention does not
+  // reset to "today" and fire a second fresh generate for a range the user already ran.
+  const remembered = (() => {
+    if (typeof sessionStorage === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem("rcl.attentionRange");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { from?: string; to?: string };
+      return parsed.from && parsed.to ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+  const [from, setFrom] = useState(initial?.from || remembered?.from || today);
+  const [to, setTo] = useState(initial?.to || remembered?.to || today);
   const rangeInitial = useRef(JSON.stringify({ from, to }));
   useEffect(() => {
     // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
     if (JSON.stringify({ from, to }) === rangeInitial.current) return;
     rangeInitial.current = "";
+    try {
+      sessionStorage.setItem("rcl.attentionRange", JSON.stringify({ from, to }));
+    } catch {
+      /* ignore quota */
+    }
     onRange?.({ from, to });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [from, to]);
