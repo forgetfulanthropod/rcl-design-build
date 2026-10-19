@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
-// Spec 05 · F6 (option B, pending Charlie's decision): the "Created with Grok" badge stays, and
+// Spec 05 · F6 (option B): the "Created with Grok" badge stays, and
 // no button or link sits under it. Dev and CI have no project id, so the real extensions.js
 // never mounts there; this stub reproduces its geometry as shipped (pill: fixed, top 8px,
 // centred, 36px tall; phones/touch: a 44px top bar plus a spacer at the top of <body>).
@@ -72,7 +72,7 @@ async function coveredControls(page: Page): Promise<string[]> {
 
 const NAV_LABELS = ["Today", "My reports", "Reports", "Attention", "Activities", "Docs", "Safety", "Team"];
 
-for (const role of ["owner", "lead", "labor", "subcontractor"] as const) {
+for (const role of ["owner", "admin", "lead", "labor", "subcontractor"] as const) {
   for (const vp of WIDTHS) {
     test(`badge never covers a control (${role}, ${vp.width}px), on every desk view`, async ({ browser }) => {
       const { ctx, page } = await as(browser, role, vp);
@@ -108,5 +108,52 @@ test("badge never covers the header actions for a long display name at 768–102
     expect(await coveredControls(page), `${width}px`).toEqual([]);
     await expect(page.locator("[data-created-with-grok-banner]")).toBeVisible();
     await ctx.close();
+  }
+});
+
+// Once #8 lands, the photo viewer's Close is absolute at right-3 top-3 with h-12 — centred about
+// 36px down, under the 44px phone bar. .below-grok-banner pushes it below the bar. Without that
+// class (or its CSS) this test fails; the coverage checks above alone pass without it.
+test.describe("photo viewer Close under the badge", () => {
+  test.describe.configure({ mode: "serial" });
+  test.beforeAll(async ({ browser }) => {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto("/login");
+    page.once("dialog", (d) => void d.accept());
+    await page.getByRole("button", { name: "Reset demo data" }).click();
+    await expect(page.getByText("Demo data reset.")).toBeVisible({ timeout: 30_000 });
+    await ctx.close();
+  });
+  for (const role of ["owner", "labor"] as const) {
+    test(`badge never covers the photo viewer Close (${role}, 390px)`, async ({ browser }) => {
+      const { ctx, page } = await as(browser, role, WIDTHS[0]);
+      // Same entry points as e2e/photo-viewer.spec.ts: Owner needs "7 days" to see photos; Labor uses My reports
+      // (today's report has none for Labor in the demo seed).
+      if (role === "owner") {
+        await page.getByRole("button", { name: "7 days", exact: true }).locator("visible=true").first().click();
+      } else {
+        await page.getByRole("button", { name: "My reports", exact: true }).locator("visible=true").first().click();
+      }
+      const thumb = page.locator("[data-photo-id]").first();
+      await expect(thumb).toBeVisible({ timeout: 20_000 });
+      await thumb.click();
+      const close = page.getByTestId("photo-viewer").getByRole("button", { name: "Close" });
+      await expect(close).toBeVisible();
+      // Assert specifically that Close's centre is free of the badge — not just "some control".
+      const covered = await page.evaluate(() => {
+        const badge = document.querySelector("[data-created-with-grok-banner]");
+        const btn = document.querySelector('[data-testid="photo-viewer"] button');
+        if (!badge || !btn) return "missing";
+        const r = btn.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit && (hit === badge || badge.contains(hit)) ? "covered" : "clear";
+      });
+      expect(covered, "Close must sit below the 44px phone bar").toBe("clear");
+      expect(await coveredControls(page), "no other control under the badge either").toEqual([]);
+      await close.click();
+      await expect(page.getByTestId("photo-viewer")).toHaveCount(0);
+      await ctx.close();
+    });
   }
 });

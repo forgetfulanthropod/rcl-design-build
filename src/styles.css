@@ -107,8 +107,8 @@
  * The badge is injected by the platform's extensions.js (scripts/grok-pwa-shared.mjs). It must
  * stay visible (AGENTS.md); these rules only keep app controls out from under it.
  * - Phones/touch: extensions.js renders a 44px top bar and inserts its own spacer, so the
- *   page flows below it. Fixed overlays that pin to the top use --grok-banner-h (set by the
- *   script, 0 elsewhere) via .below-grok-banner.
+ *   page flows below it. Fixed overlays that pin to the top (the photo viewer's Close) use
+ *   .below-grok-banner: top = banner height + the same 0.75rem gap they had before.
  * - Desktop: it floats a 36px pill at top:8px, centred. The desk header is pushed below it
  *   while the badge is present, so the header actions never sit under it at any width.
  */
@@ -118,5 +118,5 @@
   }
 }
 .below-grok-banner {
-  top: var(--grok-banner-h, 0px);
+  top: calc(var(--grok-banner-h, 0px) + 0.75rem);
 }

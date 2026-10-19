@@ -62,7 +62,7 @@ export function PhotoThumb({ id, thumb, alt }: { id: string; thumb: string; alt:
             <button
               type="button"
               autoFocus
-              className="absolute right-3 top-3 inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-line bg-surface px-4 text-base text-fg"
+              className="below-grok-banner absolute right-3 top-3 inline-flex h-12 min-w-12 items-center justify-center rounded-md border border-line bg-surface px-4 text-base text-fg"
               onClick={(event) => event.stopPropagation()}
             >
               Close
