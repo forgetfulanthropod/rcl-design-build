@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { needsFreshAttention } from "@/lib/attention";
+import { attentionRangeKey, shareAttentionFresh } from "@/lib/attention-inflight";
 import { getAttention, listMyReports, reviewReports } from "@/lib/server/fns";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { ReportCard } from "@/components/report-card";
@@ -240,7 +241,10 @@ export function AttentionView({
       }
       if (!generate) return;
       setFresh(true);
-      const full = await getAttention({ data: { ...range, refresh } });
+      // F1: onRange replace or a remount can start a second generate for the same range; share one.
+      const full = await shareAttentionFresh(attentionRangeKey(range.from, range.to), () =>
+        getAttention({ data: { ...range, refresh } }),
+      );
       if (id !== seq.current) return;
       setData(full);
     } catch (cause) {

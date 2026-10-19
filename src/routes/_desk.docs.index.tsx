@@ -15,7 +15,11 @@ function DocsRoute() {
       section={section ?? "policy"}
       onSection={(next) => void navigate({ to: "/docs", search: { section: next }, replace: true })}
       docId=""
-      onOpenDoc={(docId) => void (docId ? navigate({ to: "/docs/$docId", params: { docId } }) : navigate({ to: "/docs" }))}
+      onOpenDoc={(docId, opts) =>
+        void (docId
+          ? navigate({ to: "/docs/$docId", params: { docId }, search: opts?.created ? { created: opts.created } : {} })
+          : navigate({ to: "/docs" }))
+      }
     />
   );
 }

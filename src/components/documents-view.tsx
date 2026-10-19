@@ -103,12 +103,17 @@ export function DocumentsView({
   docId,
   onOpenDoc,
   onTitle,
+  createdFlash,
+  onClearCreated,
 }: {
   section?: DocSectionId;
   onSection?: (section: DocSectionId) => void;
   docId?: string;
-  onOpenDoc?: (docId: string) => void;
+  onOpenDoc?: (docId: string, opts?: { created?: string }) => void;
   onTitle?: (title: string) => void;
+  /** F1: "RFI 00N created" carried in the URL across /docs → /docs/$docId. */
+  createdFlash?: string;
+  onClearCreated?: () => void;
 } = {}) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
@@ -130,20 +135,13 @@ export function DocumentsView({
   const [replyFrom, setReplyFrom] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [creating, setCreating] = useState(false);
-  const [created, setCreated] = useState("");
+  const [created, setCreated] = useState(createdFlash ?? "");
   const desktop = useDesktop();
 
-  // F1: opening a new doc navigates to /docs/$docId and remounts — keep the "RFI 00N created" flash.
+  // Drop ?created= from the URL once we've shown the banner (keeps reload clean).
   useEffect(() => {
-    try {
-      const msg = sessionStorage.getItem("rcl.docCreated");
-      if (msg) {
-        setCreated(msg);
-        sessionStorage.removeItem("rcl.docCreated");
-      }
-    } catch {
-      /* ignore */
-    }
+    if (createdFlash) onClearCreated?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -319,12 +317,8 @@ export function DocumentsView({
                     if (doc) {
                       const msg = createdMessage(doc.kind, doc.number);
                       setCreated(msg);
-                      try {
-                        sessionStorage.setItem("rcl.docCreated", msg);
-                      } catch {
-                        /* ignore */
-                      }
-                      setOpenId(doc.id);
+                      // Carry the banner in the URL so /docs/$docId still shows it after F1 navigate.
+                      onOpenDoc ? onOpenDoc(doc.id, { created: msg }) : setOpenId(doc.id);
                       setEmail(doc.counterpartyEmail);
                     }
                   });
