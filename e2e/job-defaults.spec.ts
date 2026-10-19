@@ -66,7 +66,8 @@ test("lead: JSA and RFI start on the lead's job; an RFI or JSA without a job is 
   await expect(selected(page, "jsa-job")).toHaveText("Whitaker kitchen remodel");
   expect(await call(page, "saveJsa", { day: today(), projectId: "", hazards: "Ladder", controls: "Footing" })).toBe("Pick a job.");
   await nav(page, "Docs").click();
-  await page.getByRole("tablist", { name: "Document sections" }).getByRole("button", { name: "Change management" }).click();
+  await page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Change management" }).click();
+  await page.getByRole("button", { name: "+ New document" }).click();
   await expect(selected(page, "doc-job")).toHaveText("Whitaker kitchen remodel");
   await expect(page.locator("#doc-job option", { hasText: "Company-wide (no job)" })).toHaveCount(0);
   const rfi = { kind: "rfi", projectId: "", title: "Which grout?", body: "", counterparty: "", counterpartyEmail: "", amount: null };
@@ -74,12 +75,12 @@ test("lead: JSA and RFI start on the lead's job; an RFI or JSA without a job is 
   await ctx.close();
 });
 
-test("subcontractor (Sam, today's report on Oak Street): Today and Docs start on Oak Street", async ({ browser }) => {
+test("subcontractor (Sam, today's report on Oak Street): Today starts on Oak Street; Docs is read-only (F2c)", async ({ browser }) => {
   const { ctx, page } = await as(browser, "subcontractor");
   await expect(selected(page, "report-job")).toHaveText("Oak Street duplex addition");
   await nav(page, "Docs").click();
-  await page.getByRole("tablist", { name: "Document sections" }).getByRole("button", { name: "Change management" }).click();
-  await expect(selected(page, "doc-job")).toHaveText("Oak Street duplex addition");
+  await expect(page.getByRole("button", { name: "+ New document" })).toHaveCount(0);
+  await expect(page.locator("#doc-job")).toHaveCount(0);
   await ctx.close();
 });
 
@@ -87,7 +88,8 @@ for (const role of ["owner", "admin"] as const) {
   test(`${role}: a policy can still be company-wide; an RFI needs a job; office activities may be company-wide`, async ({ browser }) => {
     const { ctx, page } = await as(browser, role);
     await nav(page, "Docs").click();
-    await page.getByRole("tablist", { name: "Document sections" }).getByRole("button", { name: "Policy" }).click();
+    await page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Policy" }).click();
+    await page.getByRole("button", { name: "+ New document" }).click();
     const options = page.locator("#doc-job option");
     await expect(options.last()).toHaveText("Company-wide (no job)");
     const policy = { kind: "policy", projectId: "", title: `Ladder policy (${role})`, body: "Three points of contact.", counterparty: "", counterpartyEmail: "", amount: null };
@@ -102,11 +104,13 @@ for (const role of ["owner", "admin"] as const) {
 test("the last job picked in a form is remembered when there's no report to go on", async ({ browser }) => {
   const { ctx, page } = await as(browser, "owner");
   await nav(page, "Docs").click();
-  await page.getByRole("tablist", { name: "Document sections" }).getByRole("button", { name: "Change management" }).click();
+  await page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Change management" }).click();
+  await page.getByRole("button", { name: "+ New document" }).click();
   await page.locator("#doc-job").selectOption({ label: "Chevy Chase dental fit-up" });
   await page.reload();
   await nav(page, "Docs").click();
-  await page.getByRole("tablist", { name: "Document sections" }).getByRole("button", { name: "Change management" }).click();
+  await page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Change management" }).click();
+  await page.getByRole("button", { name: "+ New document" }).click();
   await expect(selected(page, "doc-job")).toHaveText("Chevy Chase dental fit-up");
   await ctx.close();
 });

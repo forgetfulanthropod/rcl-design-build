@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { lunchStepScroll } from "@/lib/lunch-step";
 import { addMyPhoto, getMyReport, saveMyReport, submitMyReport } from "@/lib/server/fns";
 import { LunchDial } from "@/components/lunch-dial";
 import { ErrorBanner, Skeleton } from "@/components/ui";
@@ -57,6 +58,15 @@ export function TodayReport() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [askLunch, setAskLunch] = useState(false);
+  const lunchStep = useRef<HTMLElement>(null);
+  // The lunch step opens below the fold on desktop: bring it into view and put the keyboard on the dial.
+  useEffect(() => {
+    const section = lunchStep.current;
+    if (!askLunch || !section) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    section.scrollIntoView(lunchStepScroll(reduced));
+    section.querySelector<HTMLElement>('[role="slider"]')?.focus({ preventScroll: true });
+  }, [askLunch]);
   const [lunch, setLunch] = useState(30);
 
   function apply(next: Loaded) {
@@ -268,7 +278,7 @@ export function TodayReport() {
       {error ? <ErrorBanner message={error} onRetry={() => setError("")} /> : null}
 
       {!submitted ? (
-        <section className="rounded-md border border-line bg-surface p-4">
+        <section ref={lunchStep} className="scroll-mb-24 rounded-md border border-line bg-surface p-4" data-testid="submit-step">
           {askLunch ? (
             <div className="grid gap-4">
               <h3 className="text-xl">How long was lunch?</h3>

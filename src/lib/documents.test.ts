@@ -32,3 +32,34 @@ test("gmail compose url carries the document subject", () => {
   assert.match(url, /RFI\+004/);
   assert.match(url, /to=a%40b\.co/);
 });
+
+import { DOC_KINDS, SECTION_EMPTY, addButtonLabel, createdMessage, docFormFields, newDocumentId } from "./documents.ts";
+
+test("docs cleanup (F4): section empty states say what's missing", () => {
+  assert.equal(SECTION_EMPTY.policy, "No policies yet.");
+  assert.equal(SECTION_EMPTY.changes, "No RFIs, submittals or change orders yet.");
+});
+
+test("docs cleanup (F4): policy has no recipient; amount only for money roles on bid/invoice/CO", () => {
+  assert.deepEqual(docFormFields("policy", true), { recipient: false, amount: false });
+  assert.deepEqual(docFormFields("rfi", true), { recipient: true, amount: false });
+  for (const kind of ["bid", "invoice", "change_order"] as const) {
+    assert.deepEqual(docFormFields(kind, true), { recipient: true, amount: true }, kind);
+    assert.deepEqual(docFormFields(kind, false), { recipient: true, amount: false }, kind);
+  }
+});
+
+test("docs cleanup (F4): after create, the new document is found and announced", () => {
+  assert.equal(createdMessage("rfi", 4), "RFI 004 created");
+  assert.equal(createdMessage("change_order", 12), "Change order 012 created");
+  assert.equal(newDocumentId([{ id: "a" }], [{ id: "b" }, { id: "a" }]), "b");
+  assert.equal(newDocumentId([{ id: "a" }], [{ id: "a" }]), null);
+});
+
+test("docs cleanup (F4): submit labels keep acronyms uppercase (Add RFI, not Add rfi)", () => {
+  assert.deepEqual(
+    DOC_KINDS.map((kind) => addButtonLabel(kind)),
+    ["Add policy", "Add bid", "Add invoice", "Add RFI", "Add submittal", "Add change order"],
+  );
+  for (const kind of DOC_KINDS) assert.doesNotMatch(addButtonLabel(kind), /\b(rfi|jsa|jha|co)\b/);
+});

@@ -407,17 +407,22 @@ export const reviewReports = createServerFn({ method: "GET" })
 
 export const getAttention = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { from: string; to: string; refresh?: boolean }) => ({
+  .validator((input: { from: string; to: string; refresh?: boolean; cachedOnly?: boolean }) => ({
     from: dayArg(input?.from),
     to: dayArg(input?.to),
     refresh: Boolean(input?.refresh),
+    cachedOnly: Boolean(input?.cachedOnly),
   }))
   .handler(async ({ data, context }) => {
     const { me, assertCan } = await reportsFor(context.userId);
     assertCan(me.role, "report.review");
     const { attentionSummary } = await import("./reports.server");
-    const { askModel } = await import("./data.server");
-    return attentionSummary(context.userId, data, (system, message) => askModel(system, [], message));
+    // The model client (data.server) is only
+    // loaded when a fresh summary is actually generated, so the cached path stays light.
+    return attentionSummary(context.userId, data, async (system, message) => {
+      const { askModel } = await import("./data.server");
+      return askModel(system, [], message);
+    });
   });
 
 export const getReportPhoto = createServerFn({ method: "GET" })

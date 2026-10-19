@@ -98,10 +98,31 @@ test("safety checks: labor records, lead manages, subs stay out", () => {
   assert.throws(() => assertCan("labor", "safety.manage"), /can't do that/);
 });
 
-test("documents: labor and subs open RFIs, the lead runs the pipeline, only principals approve money", () => {
+test("daily JSA: lead and up record it; labor keeps its own orientation but only reads the JSA (spec 05 · F2b)", () => {
+  for (const r of ["lead", "owner", "admin", "superadmin"]) assert.equal(can(r, "jsa.write"), true, r);
+  for (const r of ["labor", "sub"]) assert.equal(can(r, "jsa.write"), false, r);
+  assert.equal(can("labor", "safety.write"), true); // own orientation
+  assert.throws(() => assertCan("labor", "jsa.write"), /can't do that/);
+});
+
+test("activities: owner and admin can add, edit and approve (spec 05 · F2a)", () => {
+  for (const r of ["owner", "admin", "superadmin"]) {
+    for (const a of ["activity.add", "activity.edit", "activity.approve"] as const) assert.equal(can(r, a), true, `${r} ${a}`);
+  }
+});
+
+// Spec 05 · F2c changed this on purpose: labor and subs read documents but no longer create
+// them (RFIs included). Labor's doc.send stays until 06's sharing setting replaces it.
+test("documents: labor and subs read documents, the lead runs the pipeline, only principals approve money", () => {
   assert.equal(can("labor", "doc.view"), true);
-  assert.equal(can("labor", "doc.create"), true);
-  assert.equal(can("labor", "doc.send"), true);
+  assert.equal(can("sub", "doc.view"), true);
+  for (const r of ["labor", "sub"]) {
+    assert.equal(can(r, "doc.create"), false, r);
+    assert.equal(can(r, "rfi.create"), false, r);
+    assert.throws(() => assertCan(r, "doc.create"), /can't do that/);
+  }
+  for (const r of ["lead", "owner", "admin", "superadmin"]) assert.equal(can(r, "doc.create"), true, r);
+  assert.equal(can("labor", "doc.send"), true); // flips to false with 06 (sharing settings)
   assert.equal(can("labor", "doc.status"), false);
   assert.equal(can("sub", "doc.send"), false);
   assert.equal(can("lead", "doc.status"), true);
