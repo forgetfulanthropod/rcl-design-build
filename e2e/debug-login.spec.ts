@@ -46,8 +46,8 @@ for (const [role, name] of ROLES) {
     await page.goto("/");
     await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
     await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-    await expect(page.getByRole("button", { name: "Sign out" }).first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(name).first()).toBeVisible();
+    // Phones show a 44px account button with the signed-in name; Sign out lives in its menu (F8).
+    await expect(page.getByRole("button", { name: `Account: ${name}` })).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/390x844-${role}.png`, fullPage: true });
     await ctx.close();

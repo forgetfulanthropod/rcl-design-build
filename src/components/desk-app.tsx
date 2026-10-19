@@ -13,7 +13,7 @@ import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
 import { SafetyView } from "@/components/safety-view";
 import { DocumentsView } from "@/components/documents-view";
 import { can, type NavId } from "@/lib/permissions";
-import { SUPER_ADMIN_PHONE_DISPLAY, samePhone } from "@/lib/roles";
+import { SUPER_ADMIN_PHONE_DISPLAY, roleLabel, samePhone } from "@/lib/roles";
 
 type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
 type View = NavId | "team";
@@ -126,7 +126,7 @@ export function DeskApp() {
                 <Users className="size-4" aria-hidden="true" /> Team
               </button>
             ) : null}
-            <UserButton />
+            <UserButton roleLabel={roleLabel(ready.profile.role)} />
           </div>
         </header>
         <OfflineBadge online={online} />
