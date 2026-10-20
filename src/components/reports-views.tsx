@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { needsFreshAttention } from "@/lib/attention";
+import { attentionRangeKey, shareAttentionFresh } from "@/lib/attention-inflight";
 import { getAttention, listMyReports, listSharingReviewQueue, reviewReports } from "@/lib/server/fns";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { ReportCard } from "@/components/report-card";
@@ -34,12 +35,33 @@ export function MyReports() {
 
 type Review = Awaited<ReturnType<typeof reviewReports>>;
 
-export function ReportsReview({ focus = "", initialDay = "" }: { focus?: string; initialDay?: string }) {
+export type ReportFilters = { from: string; to: string; job: string; person: string };
+
+export function ReportsReview({
+  focus = "",
+  initialDay = "",
+  initial,
+  onFilters,
+}: {
+  focus?: string;
+  initialDay?: string;
+  /** Filters from the URL (spec 05 · F1). */
+  initial?: Partial<ReportFilters>;
+  onFilters?: (filters: ReportFilters) => void;
+}) {
   const today = localDay();
-  const [from, setFrom] = useState(initialDay || today);
-  const [to, setTo] = useState(initialDay || today);
-  const [projectId, setProjectId] = useState("");
-  const [personId, setPersonId] = useState("");
+  const [from, setFrom] = useState(initial?.from || initialDay || today);
+  const [to, setTo] = useState(initial?.to || initialDay || today);
+  const [projectId, setProjectId] = useState(initial?.job ?? "");
+  const [personId, setPersonId] = useState(initial?.person ?? "");
+  const filtersInitial = useRef(JSON.stringify({ from, to, job: projectId, person: personId }));
+  useEffect(() => {
+    // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
+    if (JSON.stringify({ from, to, job: projectId, person: personId }) === filtersInitial.current) return;
+    filtersInitial.current = "";
+    onFilters?.({ from, to, job: projectId, person: personId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, projectId, personId]);
   const [data, setData] = useState<Review | null>(null);
   const [error, setError] = useState("");
   const [moreFilters, setMoreFilters] = useState(false);
@@ -197,13 +219,44 @@ function SharingReviewSection({ onReview }: { onReview: (projectId: string) => v
 export function AttentionView({
   openReport,
   onReviewSharing,
+  initial,
+  onRange,
 }: {
   openReport: (reportId: string, day: string) => void;
   onReviewSharing?: (projectId: string) => void;
+  /** Range from the URL (spec 05 · F1). */
+  initial?: { from?: string; to?: string };
+  onRange?: (range: { from: string; to: string }) => void;
 }) {
   const today = localDay();
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
+  // F1 remounts on every nav. Remember the last range so Reports → Attention does not
+  // reset to "today" and fire a second fresh generate for a range the user already ran.
+  const remembered = (() => {
+    if (typeof sessionStorage === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem("rcl.attentionRange");
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { from?: string; to?: string };
+      return parsed.from && parsed.to ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+  const [from, setFrom] = useState(initial?.from || remembered?.from || today);
+  const [to, setTo] = useState(initial?.to || remembered?.to || today);
+  const rangeInitial = useRef(JSON.stringify({ from, to }));
+  useEffect(() => {
+    // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
+    if (JSON.stringify({ from, to }) === rangeInitial.current) return;
+    rangeInitial.current = "";
+    try {
+      sessionStorage.setItem("rcl.attentionRange", JSON.stringify({ from, to }));
+    } catch {
+      /* ignore quota */
+    }
+    onRange?.({ from, to });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to]);
   const [data, setData] = useState<Attention | null>(null);
   const [busy, setBusy] = useState(false); // the instant, cache-only read
   const [fresh, setFresh] = useState(false); // a fresh AI summary is being written
@@ -231,7 +284,10 @@ export function AttentionView({
       }
       if (!generate) return;
       setFresh(true);
-      const full = await getAttention({ data: { ...range, refresh } });
+      // F1: onRange replace or a remount can start a second generate for the same range; share one.
+      const full = await shareAttentionFresh(`${attentionRangeKey(range.from, range.to)}|${refresh ? "refresh" : "auto"}`, () =>
+        getAttention({ data: { ...range, refresh } }),
+      );
       if (id !== seq.current) return;
       setData(full);
     } catch (cause) {

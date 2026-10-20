@@ -430,6 +430,16 @@ export async function attentionSummary(
   return { ...base, status: "ok", items, generatedAt: new Date().toISOString() };
 }
 
+/** One report by id, for /reports/$reportId (spec 05 · F1). Principals only, own company only. */
+export async function reviewReport(userId: string, id: string): Promise<DailyReport> {
+  const sql = await getSql();
+  const me = await requirePrincipal(sql, userId);
+  const rows = await sql.query<Row>(`${SELECT} where r.company_id = $1 and r.id = $2`, [me.companyId, id]);
+  const [report] = await hydrate(sql, rows);
+  if (!report) throw new Error("Report not found.");
+  return report;
+}
+
 /** Report-based hints for the form job default (spec 05 · F3). See src/lib/current-job.ts. */
 export async function jobHints(userId: string, day: string): Promise<import("@/lib/current-job").JobHints> {
   const sql = await getSql();

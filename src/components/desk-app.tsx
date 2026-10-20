@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { DeskContext, type DeskResult } from "@/components/desk-context";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { AlertTriangle, CalendarRange, ClipboardList, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, getSharingReviewCount, loadDesk } from "@/lib/server/fns";
@@ -6,19 +8,11 @@ import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
-import { CrewView as TeamInviteView } from "@/components/desk-views";
-import { CrewView } from "@/components/crew-view";
-import { TodayReport } from "@/components/today-report";
-import { AttentionView, MyReports, ReportsReview } from "@/components/reports-views";
-import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
-import { SafetyView } from "@/components/safety-view";
-import { DocumentsView } from "@/components/documents-view";
-import { SharingSettings } from "@/components/sharing-settings";
 import { can, type NavId } from "@/lib/permissions";
+import { VIEW_LABEL, VIEW_PATH, canOpen, deskRedirect, pageTitle, viewForPath, type DeskView } from "@/lib/desk-routes";
 import { SUPER_ADMIN_PHONE_DISPLAY, roleLabel, samePhone } from "@/lib/roles";
 
-type DeskResult = Awaited<ReturnType<typeof loadDesk>>;
-type View = NavId | "team" | "settings";
+type View = DeskView;
 
 // Slimmed to daily reports. The older desk views (Desk home, Jobs, Site/dispatch board, work orders,
 // RFIs, change orders, milestones, contract values, Log, Foreman) are hidden from navigation; their
@@ -34,16 +28,71 @@ const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
   { id: "docs", label: "Docs", icon: Files },
 ];
 
-export function DeskApp() {
+/**
+ * The desk shell (sidebar, header, bottom nav) around the current route (spec 05 · F1).
+ * The view comes from the URL; a view that isn't on this role's desk redirects to the
+ * role's default with "That page isn't on your desk."
+ */
+export function DeskApp({ children }: { children?: ReactNode }) {
   const [data, setData] = useState<DeskResult | null>(null);
   const [error, setError] = useState("");
-  const [view, setView] = useState<View | "">("");
-  const [focus, setFocus] = useState({ id: "", day: "" });
-  const [sharingProject, setSharingProject] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [recordTitle, setRecordTitle] = useState("");
   const [reviewBadge, setReviewBadge] = useState(0);
   const [badgeTick, setBadgeTick] = useState(0);
-  const [attempt, setAttempt] = useState(0);
   const online = useOnline();
+  const navigate = useNavigate();
+  // Two paths matter (spec 05 · F1):
+  // - `target`: where the router is (or is heading). The nav, header and title follow it, so a tab
+  //   click shows at once even while a cold route chunk is still loading.
+  // - `rendered`: the route actually on screen (the last match). While it differs from the target
+  //   view, the old view is stale and is not shown, so a click can't land on it and replace the
+  //   in-flight navigation (e.g. Reports' "7 days" filter undoing an Attention click).
+  // Redirects only run once the router has settled (status "idle"), on the settled location.
+  const settled = useRouterState({ select: (state) => state.status === "idle" });
+  const target = useRouterState({ select: (state) => state.location.pathname });
+  const rendered = useRouterState({ select: (state) => state.matches[state.matches.length - 1]?.pathname ?? state.location.pathname });
+  const view = viewForPath(target);
+  const renderedView = viewForPath(rendered);
+  const role = data && !data.needsSetup ? data.profile.role : "";
+  const allowed = Boolean(role && view && canOpen(role, view));
+  // Spec 06 header badge: how many jobs still need a sharing review. Refreshed on every navigation
+  // (including /settings?project=…) and whenever Settings saves something.
+  const href = useRouterState({ select: (state) => state.location.href });
+  useEffect(() => {
+    if (!role || !can(role, "settings.sharing.view")) return;
+    let cancelled = false;
+    getSharingReviewCount()
+      .then((n) => !cancelled && setReviewBadge(n))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [role, href, badgeTick]);
+
+  useEffect(() => {
+    // Never during a pending transition: only a settled "/" (or a page this role can't open)
+    // goes to the role's first view, so a nav click right after sign-in is never overwritten.
+    const next = deskRedirect(role, target, settled);
+    if (!next) return;
+    if (next.notice) setNotice(next.notice);
+    void navigate({ to: next.to, replace: true });
+  }, [role, settled, target, navigate]);
+
+  useEffect(() => {
+    setRecordTitle("");
+  }, [target]);
+
+  useEffect(() => {
+    if (view && allowed) document.title = pageTitle(view, recordTitle);
+  }, [view, allowed, recordTitle]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,20 +108,6 @@ export function DeskApp() {
       cancelled = true;
     };
   }, [attempt]);
-
-  // Header badge: how many jobs still need a sharing review. Refreshed whenever the view changes.
-  const role = data && !data.needsSetup ? data.profile.role : "";
-  const sharingPage = view === "settings" ? sharingProject || "list" : "";
-  useEffect(() => {
-    if (!role || !can(role, "settings.sharing.view")) return;
-    let cancelled = false;
-    getSharingReviewCount()
-      .then((n) => !cancelled && setReviewBadge(n))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [role, view, sharingPage, badgeTick]);
 
   async function commit(work: Promise<DeskResult>) {
     setError("");
@@ -112,19 +147,20 @@ export function DeskApp() {
     .filter((item): item is (typeof NAV)[number] => Boolean(item));
   const canTeam = can(ready.profile.role, "crew.invite");
   const canSettings = can(ready.profile.role, "settings.sharing.view");
-  const current: View =
-    view === "team" && canTeam
-      ? "team"
-      : view === "settings" && canSettings
-        ? "settings"
-        : nav.some((item) => item.id === view)
-          ? (view as NavId)
-          : (nav[0]?.id ?? "today");
-  const label = current === "team" ? "Team" : current === "settings" ? "Sharing settings" : current === "crew" ? "Crew" : NAV.find((item) => item.id === current)?.label;
-  const openSharing = (projectId = "") => {
-    setSharingProject(projectId);
-    setView("settings");
-  };
+  const current: View | null = allowed ? view : null;
+  const label = current ? VIEW_LABEL[current] : "";
+  const go = (to: View) => void navigate({ to: VIEW_PATH[to] });
+
+  // On "/" (or a page this role can't open) the redirect to the role's first view is still in
+  // flight. Don't render the nav yet: a click there would be overwritten when the redirect lands.
+  if (!current) {
+    return (
+      <main className="mx-auto grid min-h-dvh max-w-lg content-center gap-4 px-5">
+        <OfflineBadge online={online} />
+        <Skeleton lines={4} label="Opening the desk" />
+      </main>
+    );
+  }
 
   return (
     <div className="min-h-dvh min-w-0 md:grid md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
@@ -138,7 +174,7 @@ export function DeskApp() {
         </div>
         <nav className="mt-6 grid gap-1">
           {nav.map((item) => (
-            <NavButton key={item.id} item={item} active={current === item.id} onClick={() => setView(item.id)} />
+            <NavButton key={item.id} item={item} active={current === item.id} onClick={() => go(item.id)} />
           ))}
         </nav>
       </aside>
@@ -152,8 +188,9 @@ export function DeskApp() {
             {canTeam ? (
               <button
                 type="button"
-                onClick={() => setView("team")}
+                onClick={() => go("team")}
                 aria-label="Team"
+                aria-current={current === "team" ? "page" : undefined}
                 className={`inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "team" ? "text-copper" : "text-muted"}`}
               >
                 <Users className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Team</span>
@@ -162,8 +199,9 @@ export function DeskApp() {
             {canSettings ? (
               <button
                 type="button"
-                onClick={() => openSharing()}
+                onClick={() => go("settings")}
                 aria-label={reviewBadge ? `Settings, ${reviewBadge} sharing review${reviewBadge === 1 ? "" : "s"} needed` : "Settings"}
+                aria-current={current === "settings" ? "page" : undefined}
                 className={`relative inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "settings" ? "text-copper" : "text-muted"}`}
               >
                 <Settings className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Settings</span>
@@ -183,31 +221,17 @@ export function DeskApp() {
             <ErrorBanner message={error} onRetry={() => setError("")} />
           </div>
         ) : null}
+        {notice ? (
+          <p role="status" className="mx-4 mt-3 rounded-md bg-raised p-3 text-base text-fg" data-testid="desk-notice">
+            {notice}
+          </p>
+        ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          {current === "today" ? <TodayReport /> : null}
-          {current === "mine" ? <MyReports /> : null}
-          {current === "reports" ? <ReportsReview key={`${focus.id}-${focus.day}`} focus={focus.id} initialDay={focus.day} /> : null}
-          {current === "attention" ? (
-            <AttentionView
-              openReport={(id, day) => {
-                setFocus({ id, day });
-                setView("reports");
-              }}
-              onReviewSharing={canSettings ? (projectId) => openSharing(projectId) : undefined}
-            />
-          ) : null}
-          {current === "activities" ? (
-            can(ready.profile.role, "report.review") ? (
-              <ActivityOverview onOpenDocs={() => setView("docs")} />
-            ) : (
-              <ActivitiesView onOpenDocs={() => setView("docs")} />
-            )
-          ) : null}
-          {current === "safety" ? <SafetyView /> : null}
-          {current === "docs" ? <DocumentsView /> : null}
-          {current === "crew" ? <CrewView role={ready.profile.role} onOpenSharing={canSettings ? (id) => openSharing(id) : undefined} /> : null}
-          {current === "team" ? <TeamInviteView data={ready} commit={commit} /> : null}
-          {current === "settings" ? <SharingSettings projectId={sharingProject} onOpenProject={setSharingProject} onChanged={() => setBadgeTick((n) => n + 1)} /> : null}
+          {renderedView === current ? (
+            <DeskContext.Provider value={{ ready, commit, setRecordTitle, sharingChanged: () => setBadgeTick((n) => n + 1) }}>{children}</DeskContext.Provider>
+          ) : (
+            <Skeleton lines={4} label={`Opening ${label}`} />
+          )}
         </div>
       </div>
       <nav
@@ -219,7 +243,7 @@ export function DeskApp() {
           <button
             key={item.id}
             type="button"
-            onClick={() => setView(item.id)}
+            onClick={() => go(item.id)}
             aria-current={current === item.id ? "page" : undefined}
             className={`flex h-16 flex-col items-center justify-center gap-1 text-[13px] font-medium ${
               current === item.id ? "text-copper" : "text-muted"
@@ -248,6 +272,7 @@ function NavButton({
     <button
       type="button"
       onClick={onClick}
+      aria-current={active ? "page" : undefined}
       className={`flex h-11 items-center gap-2 rounded-md px-2 text-left text-sm ${
         active ? "bg-raised text-fg" : "text-muted hover:text-fg"
       }`}

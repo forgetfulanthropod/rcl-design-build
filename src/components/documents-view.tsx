@@ -11,7 +11,7 @@ type Board = Awaited<ReturnType<typeof listDocuments>>;
 type Card = Board["documents"][number];
 
 /** Short list that sits beside the activity board. Full editing stays on Docs. */
-export function DocumentRail({ onOpen }: { onOpen: () => void }) {
+export function DocumentRail({ onOpen }: { onOpen: (docId?: string) => void }) {
   const [board, setBoard] = useState<Board | null>(null);
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export function DocumentRail({ onOpen }: { onOpen: () => void }) {
     <aside className="grid content-start gap-2 rounded-md border border-line bg-surface p-4" data-testid="doc-rail" aria-label="Documents">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg text-fg">Documents</h2>
-        <button type="button" onClick={onOpen} className="h-11 px-2 text-sm text-copper">
+        <button type="button" onClick={() => onOpen()} className="h-11 px-2 text-sm text-copper">
           Manage
         </button>
       </div>
@@ -44,7 +44,7 @@ export function DocumentRail({ onOpen }: { onOpen: () => void }) {
         <ul className="grid gap-2">
           {board.documents.slice(0, 8).map((doc) => (
             <li key={doc.id}>
-              <button type="button" onClick={onOpen} className="w-full text-left">
+              <button type="button" onClick={() => onOpen(doc.id)} className="w-full text-left">
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="text-sm text-fg">{sectionFor(doc.kind).label}</span>
                   <span className="text-sm text-copper">{doc.status}</span>
@@ -96,12 +96,37 @@ function NewDocument({ desktop, title, onClose, children }: { desktop: boolean; 
   );
 }
 
-export function DocumentsView() {
+/**
+ * Docs. With routing (spec 05 · F1) the section and the open document live in the URL:
+ * pass `section`/`docId` from the route and get `onSection`/`onOpenDoc` back.
+ */
+export function DocumentsView({
+  section: sectionParam,
+  onSection,
+  docId,
+  onOpenDoc,
+  onTitle,
+  createdFlash,
+  onClearCreated,
+}: {
+  section?: DocSectionId;
+  onSection?: (section: DocSectionId) => void;
+  docId?: string;
+  onOpenDoc?: (docId: string, opts?: { created?: string }) => void;
+  onTitle?: (title: string) => void;
+  /** F1: "RFI 00N created" carried in the URL across /docs → /docs/$docId. */
+  createdFlash?: string;
+  onClearCreated?: () => void;
+} = {}) {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [section, setSection] = useState<DocSectionId>("policy");
-  const [openId, setOpenId] = useState("");
+  const [sectionState, setSectionState] = useState<DocSectionId>(sectionParam ?? "policy");
+  const section = sectionParam ?? sectionState;
+  const setSection = (next: DocSectionId) => (onSection ? onSection(next) : setSectionState(next));
+  const [openState, setOpenState] = useState("");
+  const openId = docId ?? openState;
+  const setOpenId = (next: string) => (onOpenDoc ? onOpenDoc(next) : setOpenState(next));
   const [kind, setKind] = useState<DocKind>("rfi");
   const job = useCurrentJob();
   const projectId = job.projectId;
@@ -114,8 +139,14 @@ export function DocumentsView() {
   const [replyFrom, setReplyFrom] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [creating, setCreating] = useState(false);
-  const [created, setCreated] = useState("");
+  const [created, setCreated] = useState(createdFlash ?? "");
   const desktop = useDesktop();
+
+  // Drop ?created= from the URL once we've shown the banner (keeps reload clean).
+  useEffect(() => {
+    if (createdFlash) onClearCreated?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -161,6 +192,13 @@ export function DocumentsView() {
   const createKind: DocKind = creatable.includes(kind) ? kind : (creatable[0] ?? "rfi");
   const fields = docFormFields(createKind, Boolean(board?.moneyVisible));
   const current = board?.documents.find((doc) => doc.id === openId) ?? null;
+  const currentTitle = current ? `${DOC_LABEL[current.kind]} ${documentNumber(current.number)}` : "";
+  useEffect(() => {
+    onTitle?.(currentTitle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTitle]);
+  // A link to a document this desk can't see (another company, or gone): say so, leak nothing.
+  const missing = Boolean(board && openId && !current);
   const thread = board?.messages.filter((message) => message.documentId === openId) ?? [];
 
   return (
@@ -171,6 +209,13 @@ export function DocumentsView() {
       ) : null}
       {!board ? (
         <Skeleton lines={4} label="Loading documents" />
+      ) : missing ? (
+        <div className="grid gap-3" data-testid="doc-missing">
+          <EmptyState title="Not found" body="This document isn't on your desk." />
+          <Button type="button" tone="ghost" onClick={() => setOpenId("")}>
+            Back to Docs
+          </Button>
+        </div>
       ) : current ? (
         <DocumentDetail
           doc={current}
@@ -274,8 +319,11 @@ export function DocumentsView() {
                     const id = newDocumentId(before, next.documents);
                     const doc = next.documents.find((item) => item.id === id);
                     if (doc) {
-                      setCreated(createdMessage(doc.kind, doc.number));
-                      setOpenId(doc.id);
+                      const msg = createdMessage(doc.kind, doc.number);
+                      setCreated(msg);
+                      // Carry the banner in the URL so /docs/$docId still shows it after F1 navigate.
+                      if (onOpenDoc) onOpenDoc(doc.id, { created: msg });
+                      else setOpenId(doc.id);
                       setEmail(doc.counterpartyEmail);
                     }
                   });
