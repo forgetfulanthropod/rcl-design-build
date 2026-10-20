@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
+import { insertProject } from "@/lib/server/sharing.server";
 import {
   COPY_PATH,
   COPY_SOURCE,
@@ -223,21 +224,19 @@ async function loadConfig(sql: Sql, companyId: string) {
 }
 
 export async function seedSample(sql: Sql, companyId: string, userId: string) {
-  const projectId = randomUUID();
-  await sql`
-    insert into projects (
-      id, company_id, name, client_name, address, phase, contract_value, summary
-    ) values (
-      ${projectId},
-      ${companyId},
-      ${"Lexington kitchen"},
-      ${"Residential remodel"},
-      ${"Lexington, KY"},
-      ${"Build"},
-      ${186000},
-      ${"Kitchen and bath remodel. 3D drawings, schematic through finish, held to the budget."}
-    )
-  `;
+  const projectId = await insertProject(
+    sql,
+    {
+      companyId,
+      name: "Lexington kitchen",
+      clientName: "Residential remodel",
+      address: "Lexington, KY",
+      phase: "Build",
+      contractValue: 186000,
+      summary: "Kitchen and bath remodel. 3D drawings, schematic through finish, held to the budget.",
+    },
+    userId,
+  );
   const milestones = [
     ["Schematic signed", "2026-04-02", true],
     ["Permit in hand", "2026-07-18", true],
@@ -735,20 +734,20 @@ export async function createProject(
   assertCan(profile.role, "project.create");
   const { workflows } = await loadConfig(sql, profile.companyId);
   if (!workflows.projectPhases.includes(input.phase)) throw new Error("Pick a phase from the list.");
-  await sql`
-    insert into projects (
-      id, company_id, name, client_name, address, phase, contract_value, summary
-    ) values (
-      ${randomUUID()},
-      ${profile.companyId},
-      ${input.name},
-      ${input.clientName},
-      ${input.address},
-      ${input.phase},
-      ${Math.round(input.contractValue)},
-      ${input.summary}
-    )
-  `;
+  // The project and its "Sharing review needed" flag are created together (spec 06).
+  await insertProject(
+    sql,
+    {
+      companyId: profile.companyId,
+      name: input.name,
+      clientName: input.clientName,
+      address: input.address,
+      phase: input.phase,
+      contractValue: input.contractValue,
+      summary: input.summary,
+    },
+    userId,
+  );
   return loadDeskData(userId);
 }
 
