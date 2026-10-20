@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { needsFreshAttention } from "@/lib/attention";
-import { getAttention, listMyReports, reviewReports } from "@/lib/server/fns";
+import { getAttention, listMyReports, listSharingReviewQueue, reviewReports } from "@/lib/server/fns";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { ReportCard } from "@/components/report-card";
 import { localDay } from "@/components/today-report";
@@ -153,7 +153,54 @@ const CAT_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-export function AttentionView({ openReport }: { openReport: (reportId: string, day: string) => void }) {
+type ReviewQueue = Awaited<ReturnType<typeof listSharingReviewQueue>>;
+
+/**
+ * Pinned system section (spec 06): jobs waiting for a sharing review, read live from the
+ * review queue. Not stored with the AI summary and never sent to the model.
+ */
+function SharingReviewSection({ onReview }: { onReview: (projectId: string) => void }) {
+  const [queue, setQueue] = useState<ReviewQueue | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    listSharingReviewQueue()
+      .then((rows) => !cancelled && setQueue(rows))
+      .catch(() => !cancelled && setQueue([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!queue || queue.length === 0) return null;
+  return (
+    <section className="grid min-w-0 gap-2 rounded-md border border-copper bg-surface p-4" aria-label="Sharing review needed" data-testid="sharing-review-section">
+      <h2 className="font-display text-lg text-fg">Sharing review needed ({queue.length})</h2>
+      <ul className="grid max-h-64 grid-cols-[minmax(0,1fr)] gap-2 overflow-y-auto md:max-h-none">
+        {queue.map((job) => (
+          <li key={job.id} className="flex min-w-0 items-center justify-between gap-3 border-t border-line pt-2 first:border-t-0 first:pt-0">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-base text-fg">{job.name}</p>
+              <p className="truncate text-sm text-muted">
+                Created by {job.requestedBy || "someone"}
+                {job.requestedAt ? ` · ${new Date(job.requestedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""} · Using company defaults
+              </p>
+            </div>
+            <button type="button" className="h-11 shrink-0 rounded-md bg-copper px-4 text-sm font-medium text-ink" onClick={() => onReview(job.id)} aria-label={`Review ${job.name}`}>
+              Review
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function AttentionView({
+  openReport,
+  onReviewSharing,
+}: {
+  openReport: (reportId: string, day: string) => void;
+  onReviewSharing?: (projectId: string) => void;
+}) {
   const today = localDay();
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
@@ -203,7 +250,8 @@ export function AttentionView({ openReport }: { openReport: (reportId: string, d
   }, [from, to]);
 
   return (
-    <div className="mx-auto grid max-w-3xl gap-4">
+    <div className="mx-auto grid min-w-0 max-w-3xl gap-4">
+      {onReviewSharing ? <SharingReviewSection onReview={onReviewSharing} /> : null}
       <div className="grid gap-2 rounded-md border border-line bg-surface p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <div className="grid grid-cols-3 gap-2 sm:col-span-3">
           {[
@@ -275,14 +323,14 @@ export function AttentionView({ openReport }: { openReport: (reportId: string, d
                     <span className="text-muted">· {CAT_LABEL[item.category] ?? item.category}</span>
                   </p>
                   <p className="mt-1 text-base text-fg">{item.summary}</p>
-                  {item.quote ? <blockquote className="mt-2 border-l-2 border-line pl-3 text-sm text-muted">“{item.quote}”</blockquote> : null}
                   <button
                     type="button"
-                    className="mt-2 inline-flex min-h-11 items-center text-sm text-copper underline"
+                    className="mt-2 inline-flex min-h-11 scroll-mb-24 items-center text-sm text-copper underline"
                     onClick={() => openReport(item.reportId, item.day)}
                   >
                     From {item.person}'s report, {new Date(`${item.day}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
                   </button>
+                  {item.quote ? <blockquote className="mt-2 border-l-2 border-line pl-3 text-sm text-muted">“{item.quote}”</blockquote> : null}
                 </li>
               ))}
             </ul>
