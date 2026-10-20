@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { approveActivity, createActivity, listActivities, overviewActivities, updateActivity } from "@/lib/server/fns";
 import { localDay, longDay } from "@/components/today-report";
 import { DocumentRail } from "@/components/documents-view";
@@ -9,9 +9,26 @@ import { BigButton, Button, EmptyState, ErrorBanner, Skeleton } from "@/componen
 type Board = Awaited<ReturnType<typeof listActivities>>;
 type Card = Board["activities"][number];
 
-export function ActivitiesView({ onOpenDocs }: { onOpenDocs?: () => void }) {
+export function ActivitiesView({
+  onOpenDocs,
+  initialDay,
+  onDay,
+}: {
+  onOpenDocs?: (docId?: string) => void;
+  /** Day from the URL (spec 05 · F1). */
+  initialDay?: string;
+  onDay?: (day: string) => void;
+}) {
   const today = localDay();
-  const [day, setDay] = useState(today);
+  const [day, setDay] = useState(initialDay || today);
+  const dayInitial = useRef(JSON.stringify(day));
+  useEffect(() => {
+    // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
+    if (JSON.stringify(day) === dayInitial.current) return;
+    dayInitial.current = "";
+    onDay?.(day);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day]);
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
   const [title, setTitle] = useState("");
@@ -265,11 +282,28 @@ export function ActivityForm({
 type Overview = Awaited<ReturnType<typeof overviewActivities>>;
 
 /** Owner and admin view: counts and the work, grouped by job. */
-export function ActivityOverview({ onOpenDocs }: { onOpenDocs?: () => void }) {
+export function ActivityOverview({
+  onOpenDocs,
+  initial,
+  onFilters,
+}: {
+  onOpenDocs?: (docId?: string) => void;
+  /** Filters from the URL (spec 05 · F1). */
+  initial?: { from?: string; to?: string; job?: string };
+  onFilters?: (filters: { from: string; to: string; job: string }) => void;
+}) {
   const today = localDay();
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
-  const [projectId, setProjectId] = useState("");
+  const [from, setFrom] = useState(initial?.from || today);
+  const [to, setTo] = useState(initial?.to || today);
+  const [projectId, setProjectId] = useState(initial?.job ?? "");
+  const filtersInitial = useRef(JSON.stringify({ from, to, job: projectId }));
+  useEffect(() => {
+    // Only after the user changes something (StrictMode-safe), so a view never rewrites the URL on mount.
+    if (JSON.stringify({ from, to, job: projectId }) === filtersInitial.current) return;
+    filtersInitial.current = "";
+    onFilters?.({ from, to, job: projectId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, projectId]);
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

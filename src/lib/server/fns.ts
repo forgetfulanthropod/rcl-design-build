@@ -249,12 +249,13 @@ export const decideProposal = createServerFn({ method: "POST" })
   });
 
 export const requestMagicLink = createServerFn({ method: "POST" })
-  .validator((input: { channel: "email" | "sms"; destination: string; name: string }) => {
+  .validator((input: { channel: "email" | "sms"; destination: string; name: string; next?: string }) => {
     if (input?.channel !== "email" && input?.channel !== "sms") throw new Error("Pick email or text.");
     return {
       channel: input.channel,
       destination: required(input.destination, 160, "Destination"),
       name: optional(input.name, 80),
+      next: optional(input.next, 300),
     };
   })
   .handler(async ({ data }) => {
@@ -288,10 +289,10 @@ export const getDebugLogin = createServerFn({ method: "GET" }).handler(async () 
 
 /** Debug-only: sign in as a seeded demo user. Refused unless DEBUG_LOGIN=true on the server. */
 export const debugSignIn = createServerFn({ method: "POST" })
-  .validator((input: { role: string }) => ({ role: required(input?.role, 20, "Role") }))
+  .validator((input: { role: string; next?: string }) => ({ role: required(input?.role, 20, "Role"), next: optional(input?.next, 300) }))
   .handler(async ({ data }) => {
     const { debugSignIn: run } = await import("./debug-login.server");
-    return run(data.role);
+    return run(data.role, data.next);
   });
 
 /** Debug-only: wipe and re-seed the demo company. Refused when DEBUG_LOGIN=false. */
@@ -403,6 +404,16 @@ export const reviewReports = createServerFn({ method: "GET" })
     assertCan(me.role, "report.review");
     const { reviewReports: run } = await import("./reports.server");
     return run(context.userId, data);
+  });
+
+export const reviewReport = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Report") }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.review");
+    const { reviewReport: run } = await import("./reports.server");
+    return run(context.userId, data.id);
   });
 
 export const getAttention = createServerFn({ method: "POST" })

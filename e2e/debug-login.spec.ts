@@ -45,8 +45,8 @@ for (const [role, name] of ROLES) {
     const page = await ctx.newPage();
     await page.goto("/");
     await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-    await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-    // Phones show a 44px account button with the signed-in name; Sign out lives in its menu (F8).
+    // F1: "/" redirects to the role's first view. F8: phone Account menu.
+    await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login", { timeout: 30_000 });
     await expect(page.getByRole("button", { name: `Account: ${name}` })).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${OUT}/390x844-${role}.png`, fullPage: true });
@@ -59,8 +59,8 @@ async function signInAs(browser: import("@playwright/test").Browser, role: strin
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
-  // Phones show an account menu (Sign out inside); md+ shows Sign out inline (F8).
+  // F1: "/" redirects to first view. F8: phone Account menu or md+ Sign out.
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login", { timeout: 30_000 });
   await expect(page.getByRole("button", { name: /^(Sign out|Account: )/ }).locator("visible=true").first()).toBeVisible({ timeout: 30_000 });
   return { ctx, page };
 }

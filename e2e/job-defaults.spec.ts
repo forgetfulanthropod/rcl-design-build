@@ -10,7 +10,8 @@ async function as(browser: Browser, role: string) {
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
+  // F1: "/" redirects to the role's first view.
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login" && !u.pathname.startsWith("/m/"), { timeout: 30_000 });
   await expect(page.locator("header").first()).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => window.localStorage.removeItem("rcl.lastJob"));
   return { ctx, page };

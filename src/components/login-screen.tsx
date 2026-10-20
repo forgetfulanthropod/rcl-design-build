@@ -7,8 +7,11 @@ import { Mark } from "@/components/mark";
 import { Button } from "@/components/ui";
 
 
-/** The sign-in screen. Also rendered at "/" when signed out. */
-export function Login() {
+/**
+ * The sign-in screen. `next` is the deep link to land on after signing in (spec 05 · F1);
+ * the server keeps it only if it's a same-origin desk path.
+ */
+export function Login({ next = "" }: { next?: string } = {}) {
   const { user, isPending } = useCurrentUserState();
   const [channel, setChannel] = useState<"email" | "sms">("email");
   const [destination, setDestination] = useState("");
@@ -28,13 +31,13 @@ export function Login() {
       </main>
     );
   }
-  if (user) return <Navigate to="/" />;
+  if (user) return <Navigate to={next && next.startsWith("/") && !next.startsWith("//") ? next.split("?")[0] : "/"} />;
 
   async function sendLink() {
     setBusy(true);
     setError("");
     try {
-      const result = await requestMagicLink({ data: { channel, destination, name } });
+      const result = await requestMagicLink({ data: { channel, destination, name, next } });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -126,7 +129,7 @@ export function Login() {
         <Button className="mt-4 w-full" disabled={busy} onClick={() => void sendLink()}>
           {busy ? "Sending…" : channel === "email" ? "Email me a link" : "Text me a link"}
         </Button>
-        <DebugRoles />
+        <DebugRoles next={next} />
         {sent ? (
           <div className="mt-4 rounded-md border border-line bg-surface p-4">
             {sent.path ? (
@@ -197,7 +200,7 @@ const DEBUG_LABELS: Record<string, string> = {
 };
 
 /** Debug-only role sign-in. The server decides whether it exists (DEBUG_LOGIN=true). */
-function DebugRoles() {
+function DebugRoles({ next = "" }: { next?: string }) {
   const [roles, setRoles] = useState<string[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -229,7 +232,7 @@ function DebugRoles() {
             onClick={() => {
               setBusy(role);
               setError("");
-              debugSignIn({ data: { role } })
+              debugSignIn({ data: { role, next } })
                 .then((result) => window.location.assign(result.path))
                 .catch((cause: unknown) => {
                   setBusy("");
