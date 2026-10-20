@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
-import { can } from "@/lib/permissions";
+import { can, ForbiddenError } from "@/lib/permissions";
+import { plausibleTakenAt } from "@/lib/photo-upload";
+import { legacyEntries, type ReportEntry, type TextEdit } from "@/lib/report-entries";
+import { addPhotoEntry, backfillEntries, entriesFor, pdfFlags, saveTextEntries } from "./entries.server";
 
 const isPrincipal = (role: string) => can(role, "report.review");
 
 const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 const MAX_THUMB_BYTES = 200 * 1024;
 const MAX_PHOTOS = 20;
-const MAX_NARRATIVE = 8000;
 const MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export type ReportPhoto = { id: string; thumb: string; takenAt: string | null; createdAt: string };
@@ -24,6 +26,10 @@ export type DailyReport = {
   lastEditAt: string | null;
   submittedAt: string | null;
   photos: ReportPhoto[];
+  /** The report as written: text and photo entries in time order (photo entries match `photos` by id). */
+  entries: ReportEntry[];
+  /** Whether the viewer may download this report as a PDF (see mayDownloadPdf). */
+  canPdf: boolean;
 };
 
 function text(v: unknown): string {
@@ -82,6 +88,13 @@ async function requirePrincipal(sql: Sql, userId: string): Promise<Member> {
 
 /** Ensures the report exists and stamps first/last edit. Refuses once submitted. */
 async function touchReport(sql: Sql, me: Member, day: string): Promise<string> {
+  const id = await openReport(sql, me, day);
+  // A report from before entries (or the demo seed) gets its entries first, so nothing is lost.
+  await backfillEntries(sql, id);
+  return id;
+}
+
+async function openReport(sql: Sql, me: Member, day: string): Promise<string> {
   await sql`
     insert into daily_reports (id, company_id, user_id, day, first_edit_at, last_edit_at)
     values (${randomUUID()}, ${me.companyId}, ${me.userId}, ${day}, now(), now())
@@ -102,15 +115,31 @@ async function touchReport(sql: Sql, me: Member, day: string): Promise<string> {
 
 type Row = Record<string, unknown>;
 
-async function hydrate(sql: Sql, rows: Row[]): Promise<DailyReport[]> {
+async function hydrate(sql: Sql, rows: Row[], viewer: Member): Promise<DailyReport[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((r) => text(r.id));
+  const entries = await entriesFor(sql, ids);
+  const flags = await pdfFlags(
+    sql,
+    viewer,
+    rows.map((r) => ({ id: text(r.id), userId: text(r.user_id), projectId: r.project_id ? text(r.project_id) : null })),
+  );
   const photos = await sql.query<{ id: string; report_id: string; thumb: Uint8Array; taken_at: unknown; created_at: unknown }>(
     `select id, report_id, thumb, taken_at, created_at from daily_report_photos
      where report_id = any($1) order by created_at asc`,
     [ids],
   );
-  return rows.map((r) => ({
+  return rows.map((r, i) => {
+    const own = photos
+      .filter((p) => text(p.report_id) === text(r.id))
+      .map((p) => ({
+        id: text(p.id),
+        thumb: `data:image/jpeg;base64,${Buffer.from(p.thumb).toString("base64")}`,
+        takenAt: iso(p.taken_at),
+        createdAt: iso(p.created_at) ?? "",
+      }));
+    const stored = entries.get(text(r.id)) ?? [];
+    return {
     id: text(r.id),
     day: dayString(r.day),
     userId: text(r.user_id),
@@ -122,21 +151,29 @@ async function hydrate(sql: Sql, rows: Row[]): Promise<DailyReport[]> {
     firstEditAt: iso(r.first_edit_at),
     lastEditAt: iso(r.last_edit_at),
     submittedAt: iso(r.submitted_at),
-    photos: photos
-      .filter((p) => text(p.report_id) === text(r.id))
-      .map((p) => ({
-        id: text(p.id),
-        thumb: `data:image/jpeg;base64,${Buffer.from(p.thumb).toString("base64")}`,
-        takenAt: iso(p.taken_at),
-        createdAt: iso(p.created_at) ?? "",
-      })),
-  }));
+    photos: own,
+    // Reports not yet backfilled (demo seed) read the same entries the backfill would write.
+    entries: stored.length
+      ? stored
+      : legacyEntries(
+          {
+            id: text(r.id),
+            narrative: text(r.narrative),
+            firstEditAt: iso(r.first_edit_at),
+            lastEditAt: iso(r.last_edit_at),
+            createdAt: iso(r.created_at) ?? "",
+          },
+          own,
+        ),
+    canPdf: flags[i] ?? false,
+    };
+  });
 }
 
 const SELECT = `
   select r.id, r.day::text as day, r.user_id, coalesce(pr.name, '') as user_name, r.project_id,
          coalesce(p.name, '') as project_name, r.narrative, r.lunch_minutes,
-         r.first_edit_at, r.last_edit_at, r.submitted_at
+         r.first_edit_at, r.last_edit_at, r.submitted_at, r.created_at
   from daily_reports r
   left join profiles pr on pr.user_id = r.user_id
   left join projects p on p.id = r.project_id`;
@@ -148,7 +185,7 @@ export async function getMyReport(userId: string, rawDay: string) {
   const sql = await getSql();
   const me = await member(sql, userId);
   const rows = await sql.query<Row>(`${SELECT} where r.user_id = $1 and r.day = $2`, [userId, day]);
-  const [found] = await hydrate(sql, rows);
+  const [found] = await hydrate(sql, rows, me);
   const jobs = await sql<{ id: string; name: string }>`
     select id, name from projects where company_id = ${me.companyId} and archived = false order by name
   `;
@@ -157,13 +194,18 @@ export async function getMyReport(userId: string, rawDay: string) {
       found ??
       ({
         id: null, day, userId, userName: me.name, projectId: null, projectName: "", narrative: "",
-        lunchMinutes: null, firstEditAt: null, lastEditAt: null, submittedAt: null, photos: [],
+        lunchMinutes: null, firstEditAt: null, lastEditAt: null, submittedAt: null, photos: [], entries: [],
+        canPdf: (await pdfFlags(sql, me, [{ id: null, userId, projectId: null }]))[0],
       } satisfies DailyReport),
     jobs: jobs.map((j) => ({ id: text(j.id), name: text(j.name) })),
   };
 }
 
-export async function saveMyReport(userId: string, input: { day: string; narrative: string; projectId: string }) {
+/**
+ * Save the editor: the job, plus its text entries (new, changed, or cleared; see planTextSave).
+ * Returns the report and the id each new text entry got, by the editor's key.
+ */
+export async function saveMyReport(userId: string, input: { day: string; texts: TextEdit[]; projectId: string }) {
   const day = editableDay(input.day);
   const sql = await getSql();
   const me = await member(sql, userId);
@@ -173,11 +215,9 @@ export async function saveMyReport(userId: string, input: { day: string; narrati
     if (!ok[0]) projectId = null;
   }
   const id = await touchReport(sql, me, day);
-  await sql`
-    update daily_reports set narrative = ${input.narrative.slice(0, MAX_NARRATIVE)}, project_id = ${projectId}
-    where id = ${id}
-  `;
-  return getMyReport(userId, day);
+  await sql`update daily_reports set project_id = ${projectId} where id = ${id}`;
+  const keys = await saveTextEntries(sql, me, id, input.texts);
+  return { ...(await getMyReport(userId, day)), keys };
 }
 
 export async function addMyPhoto(
@@ -192,11 +232,13 @@ export async function addMyPhoto(
   const id = await touchReport(sql, me, day);
   const count = await sql<{ n: number }>`select count(*) as n from daily_report_photos where report_id = ${id}`;
   if (Number(count[0]?.n ?? 0) >= MAX_PHOTOS) throw new Error(`Up to ${MAX_PHOTOS} photos per day.`);
+  const photoId = randomUUID();
   await sql`
     insert into daily_report_photos (id, report_id, company_id, user_id, mime, bytes, thumb, size_bytes, width, height, taken_at)
-    values (${randomUUID()}, ${id}, ${me.companyId}, ${userId}, ${full.mime}, ${full.bytes}, ${thumb.bytes},
-            ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${iso(input.takenAt)})
+    values (${photoId}, ${id}, ${me.companyId}, ${userId}, ${full.mime}, ${full.bytes}, ${thumb.bytes},
+            ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${plausibleTakenAt(iso(input.takenAt))})
   `;
+  await addPhotoEntry(sql, me, id, photoId);
   return getMyReport(userId, day);
 }
 
@@ -215,8 +257,9 @@ export async function submitMyReport(userId: string, input: { day: string; lunch
 
 export async function listMyReports(userId: string) {
   const sql = await getSql();
+  const me = await member(sql, userId);
   const rows = await sql.query<Row>(`${SELECT} where r.user_id = $1 order by r.day desc limit 60`, [userId]);
-  return hydrate(sql, rows);
+  return hydrate(sql, rows, me);
 }
 
 // ---------- principals: review ----------
@@ -236,7 +279,7 @@ export async function reviewReports(userId: string, input: { from: string; to: s
     where += ` and r.user_id = $${params.length}`;
   }
   const rows = await sql.query<Row>(`${SELECT} where ${where} order by r.day desc, user_name asc`, params);
-  const reports = await hydrate(sql, rows);
+  const reports = await hydrate(sql, rows, me);
   const jobs = await sql<{ id: string; name: string }>`select id, name from projects where company_id = ${me.companyId} order by name`;
   const people = await sql<{ user_id: string; name: string; role: string }>`
     select user_id, name, role from profiles where company_id = ${me.companyId} order by name
@@ -259,6 +302,41 @@ export async function readPhoto(userId: string, photoId: string) {
   if (!p) return null;
   if (text(p.user_id) !== userId && !isPrincipal(me.role)) return null;
   return { mime: text(p.mime), bytes: Buffer.from(p.bytes) };
+}
+
+// ---------- PDF download ----------
+
+/**
+ * Everything the report PDF shows, for a viewer allowed to download it (mayDownloadPdf):
+ * the author's own report by day, or any report in the company by id for Owner/Admin. Only
+ * job, day, author, edit times, lunch and entries; never any money. The browser builds the PDF
+ * (src/lib/report-pdf.ts) and fetches full photos through getReportPhoto.
+ */
+export async function reportPdfData(userId: string, input: { reportId?: string; day?: string }) {
+  const sql = await getSql();
+  const me = await member(sql, userId);
+  let report: DailyReport | undefined;
+  if (input.reportId) {
+    const rows = await sql.query<Row>(`${SELECT} where r.id = $1 and r.company_id = $2`, [input.reportId, me.companyId]);
+    [report] = await hydrate(sql, rows, me);
+    if (!report) throw new Error("Report not found.");
+  } else {
+    report = (await getMyReport(userId, input.day ?? "")).report;
+  }
+  if (!report.canPdf) throw new ForbiddenError("doc.send");
+  return {
+    day: report.day,
+    userName: report.userName,
+    projectName: report.projectName,
+    firstEditAt: report.firstEditAt,
+    lastEditAt: report.lastEditAt,
+    lunchMinutes: report.lunchMinutes,
+    submittedAt: report.submittedAt,
+    entries: report.entries.map((e) => ({
+      ...e,
+      takenAt: e.photoId ? (report.photos.find((p) => p.id === e.photoId)?.takenAt ?? null) : null,
+    })),
+  };
 }
 
 // ---------- AI attention summary ----------
@@ -361,7 +439,7 @@ export async function reviewReport(userId: string, id: string): Promise<DailyRep
   const sql = await getSql();
   const me = await requirePrincipal(sql, userId);
   const rows = await sql.query<Row>(`${SELECT} where r.company_id = $1 and r.id = $2`, [me.companyId, id]);
-  const [report] = await hydrate(sql, rows);
+  const [report] = await hydrate(sql, rows, me);
   if (!report) throw new Error("Report not found.");
   return report;
 }

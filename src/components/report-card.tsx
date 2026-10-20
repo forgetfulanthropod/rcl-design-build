@@ -1,6 +1,7 @@
 import type { DailyReport } from "@/lib/server/reports.server";
 import { clock, longDay } from "@/components/today-report";
 import { PhotoThumb } from "@/components/photo-thumb";
+import { ReportPdfButton } from "@/components/report-pdf-button";
 
 export function ReportCard({ report, showPerson = true, highlight = false }: { report: DailyReport; showPerson?: boolean; highlight?: boolean }) {
   return (
@@ -31,6 +32,7 @@ export function ReportCard({ report, showPerson = true, highlight = false }: { r
         First edit {clock(report.firstEditAt)} · Last edit {clock(report.lastEditAt)} · Lunch{" "}
         {report.lunchMinutes == null ? "—" : `${report.lunchMinutes} min`}
       </p>
+      {report.canPdf && report.id ? <ReportPdfButton className="mt-3 sm:max-w-xs" target={{ reportId: report.id }} /> : null}
     </article>
   );
 }

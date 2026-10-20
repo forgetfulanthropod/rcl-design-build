@@ -339,11 +339,19 @@ export const getMyReport = createServerFn({ method: "GET" })
 
 export const saveMyReport = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { day: string; narrative: string; projectId: string }) => ({
-    day: dayArg(input?.day),
-    narrative: typeof input?.narrative === "string" ? input.narrative.slice(0, 8000) : "",
-    projectId: optional(input?.projectId, 80),
-  }))
+  .validator((input: { day: string; texts: { id: string | null; key: string; body: string }[]; projectId: string }) => {
+    const texts = Array.isArray(input?.texts) ? input.texts : [];
+    if (texts.length > 200) throw new Error("Too many entries.");
+    return {
+      day: dayArg(input?.day),
+      texts: texts.map((t) => ({
+        id: typeof t?.id === "string" && t.id ? t.id.slice(0, 80) : null,
+        key: typeof t?.key === "string" ? t.key.slice(0, 80) : "",
+        body: typeof t?.body === "string" ? t.body.slice(0, 8000) : "",
+      })),
+      projectId: optional(input?.projectId, 80),
+    };
+  })
   .handler(async ({ data, context }) => {
     const { me, assertCan } = await reportsFor(context.userId);
     assertCan(me.role, "report.write");
@@ -434,6 +442,18 @@ export const getAttention = createServerFn({ method: "POST" })
       const { askModel } = await import("./data.server");
       return askModel(system, [], message);
     });
+  });
+
+/** What the report PDF shows; refused (ForbiddenError) unless the viewer may download it. */
+export const getReportPdfData = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { reportId?: string; day?: string }) => ({
+    reportId: optional(input?.reportId, 80) || undefined,
+    day: input?.reportId ? undefined : dayArg(input?.day),
+  }))
+  .handler(async ({ data, context }) => {
+    const { reportPdfData } = await import("./reports.server");
+    return reportPdfData(context.userId, data);
   });
 
 export const getReportPhoto = createServerFn({ method: "GET" })
