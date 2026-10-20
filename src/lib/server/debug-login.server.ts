@@ -323,6 +323,9 @@ async function seedReports(sql: Sql, ids: Record<DebugRole, string>, jobIds: str
                 ${Buffer.from(photo.thumb, "base64")}, ${full.length}, ${480}, ${360}, ${times.photos[n].taken}, ${times.photos[n].created})
       `;
     }
+    // Seeded days are written the old way (narrative + photos); give them entries like migration 0017 does.
+    const { backfillEntries } = await import("./entries.server");
+    await backfillEntries(sql, id);
   }
 }
 
