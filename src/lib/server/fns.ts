@@ -317,6 +317,15 @@ async function reportsFor(userId: string) {
   return { me, assertCan };
 }
 
+/** Hints for which job a form starts on (spec 05 · F3). Any signed-in crew member. */
+export const getJobHints = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string }) => ({ day: dayArg(input?.day) }))
+  .handler(async ({ data, context }) => {
+    const { jobHints } = await import("./reports.server");
+    return jobHints(context.userId, data.day);
+  });
+
 export const getMyReport = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((input: { day: string }) => ({ day: dayArg(input?.day) }))
