@@ -13,7 +13,7 @@ async function as(browser: Browser, role: string, viewport = DESKTOP) {
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: LABEL[role], exact: true }).click();
-  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login" && !u.pathname.startsWith("/m/"), { timeout: 30_000 }); // F1: "/" → first view
   await expect(page.locator("header").first()).toBeVisible({ timeout: 30_000 });
   await page.getByRole("button", { name: "Docs", exact: true }).locator("visible=true").first().click();
   await expect(page.getByTestId("documents")).toBeVisible();

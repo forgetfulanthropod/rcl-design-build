@@ -102,6 +102,10 @@ for (const role of ["labor", "subcontractor"] as const) {
           expect(r.ok, fn).toBe(false);
           expect(r.error, fn).toContain(action);
         }
+        // The URL doesn't open it either.
+        await page.goto(`/time?week=${today}`);
+        await expect(page.getByTestId("desk-notice")).toHaveText("That page isn't on your desk.");
+        await expect(page).toHaveURL(/\/today$/);
         // Their own hours are theirs.
         const mine = await call(page, "getMyHours", { week: today });
         expect(mine.ok, mine.error).toBe(true);
@@ -232,6 +236,7 @@ test("labor: the rejected day shows its reason; fixing it re-sends 8h 00m with a
   await expect(page.getByTestId(`my-hours-${today}`).getByLabel("Rejected")).toBeVisible();
   await expect(page.getByTestId("rejected-reason")).toHaveText("Sent back: Lunch was an hour on site.");
   await page.getByRole("button", { name: /^Fix / }).click();
+  await expect(page).toHaveURL(new RegExp(`/today\\?day=${today}$`));
   await expect(page.locator("#narrative")).toBeEnabled();
   await page.getByRole("button", { name: "Submit my day", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Sent back: Lunch was an hour on site." })).toBeVisible();
@@ -249,7 +254,7 @@ test("labor: the rejected day shows its reason; fixing it re-sends 8h 00m with a
   await ctx.close();
 });
 
-test("lead: approves Luis's re-sent day from the drawer; bulk approve leaves flagged days and her own out", async ({ browser }) => {
+test("lead: approves Luis's re-sent day from the drawer; bulk approve leaves flagged days and her own out; the week is in the URL", async ({ browser }) => {
   const { ctx, page } = await as(browser, "lead");
   await openTime(page);
   const cell = page.getByTestId(`cell-${luisId}-${today}`).first();
@@ -261,6 +266,21 @@ test("lead: approves Luis's re-sent day from the drawer; bulk approve leaves fla
   await expect(page.getByTestId(`cell-${luisId}-${today}`).first()).toHaveAttribute("data-status", "approved");
   await expect(page.getByTestId(`cell-${luisId}-${today}`).last()).toHaveAttribute("data-status", "approved");
   await expect(page.getByTestId("bulk-bar")).toContainText("Flagged days and your own hours are left out.");
+  // The week is in the URL: last week, reload, still last week; back to this week.
+  await expect(page).toHaveURL(/\/time\?week=\d{4}-\d{2}-\d{2}$/);
+  const thisWeek = new URL(page.url()).searchParams.get("week")!;
+  await page.getByRole("button", { name: "Previous week" }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("week")).not.toBe(thisWeek);
+  const lastWeek = new URL(page.url()).searchParams.get("week")!;
+  expect(lastWeek).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  await expect(page.getByTestId(`cell-${luisId}-${today}`)).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("time-view")).toBeVisible({ timeout: 30_000 });
+  expect(new URL(page.url()).searchParams.get("week")).toBe(lastWeek);
+  await expect(page.getByTestId(`cell-${luisId}-${today}`)).toHaveCount(0);
+  await page.goto(`/time?week=${today}`);
+  await expect(page.getByTestId(`cell-${luisId}-${today}`).first()).toHaveAttribute("data-status", "approved");
+  await expect(page).toHaveTitle("Time · RCL");
   await ctx.close();
 });
 

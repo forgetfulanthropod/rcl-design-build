@@ -1,0 +1,91 @@
+/**
+ * Desk URLs (spec 05 · F1). Every view and record has a path, so reload, back/forward and
+ * sharing a link all work. Pure helpers, shared by the routes, the shell and the tests.
+ */
+import { can, navFor, type NavId } from "./permissions.ts";
+import { safeRedirect } from "./sign-in-complete.ts";
+
+export type DeskView = NavId | "team" | "settings";
+
+export const VIEW_PATH: Record<DeskView, string> = {
+  today: "/today",
+  mine: "/mine",
+  reports: "/reports",
+  attention: "/attention",
+  crew: "/crew",
+  time: "/time",
+  activities: "/activities",
+  safety: "/safety",
+  docs: "/docs",
+  team: "/team",
+  settings: "/settings",
+};
+
+export const VIEW_LABEL: Record<DeskView, string> = {
+  today: "Today",
+  mine: "My reports",
+  reports: "Reports",
+  attention: "Attention",
+  crew: "Crew",
+  time: "Time",
+  activities: "Activities",
+  safety: "Safety",
+  docs: "Docs",
+  team: "Team",
+  settings: "Sharing settings",
+};
+
+/** The desk view a path belongs to ("/docs/abc" → "docs"), or null for non-desk paths. */
+export function viewForPath(pathname: string): DeskView | null {
+  const first = `/${pathname.split("/").filter(Boolean)[0] ?? ""}`;
+  const hit = (Object.entries(VIEW_PATH) as [DeskView, string][]).find(([, path]) => path === first);
+  return hit ? hit[0] : null;
+}
+
+/** Views this role has on its desk: its nav, plus Team for crew managers and Settings for sharing (spec 06). */
+export function viewsFor(role: string): DeskView[] {
+  const views: DeskView[] = [...navFor(role)];
+  if (can(role, "crew.invite")) views.push("team");
+  if (can(role, "settings.sharing.view")) views.push("settings");
+  return views;
+}
+
+export function canOpen(role: string, view: DeskView): boolean {
+  return viewsFor(role).includes(view);
+}
+
+/** Where "/" (and a page that isn't on this desk) goes: the role's first nav item. */
+export function defaultPath(role: string): string {
+  const first = navFor(role)[0];
+  return first ? VIEW_PATH[first] : VIEW_PATH.today;
+}
+
+export const NOT_ON_DESK = "That page isn't on your desk.";
+
+/**
+ * Where the desk shell should send this role, or null to stay. Only a settled router redirects
+ * (never during a pending transition, so a nav click right after sign-in is not overwritten),
+ * and only from "/" (or another non-desk path) or a view this role can't open.
+ */
+export function deskRedirect(role: string, pathname: string, settled: boolean): { to: string; notice: string } | null {
+  if (!role || !settled) return null;
+  const view = viewForPath(pathname);
+  if (!view) return { to: defaultPath(role), notice: "" };
+  if (!canOpen(role, view)) return { to: defaultPath(role), notice: NOT_ON_DESK };
+  return null;
+}
+
+/** "<Record> · <View> · RCL", or "<View> · RCL" without a record. */
+export function pageTitle(view: DeskView, record?: string | null): string {
+  return [record?.trim(), VIEW_LABEL[view], "RCL"].filter(Boolean).join(" · ");
+}
+
+/**
+ * Where to land after signing in from a deep link. Same-origin paths only; sign-in pages
+ * (which would loop) and anything else fall back to "/".
+ */
+export function safeNext(next: string | null | undefined): string {
+  const path = safeRedirect(next ?? "");
+  if (path === "/" || path.startsWith("/login") || path.startsWith("/m/") || path.startsWith("/api/")) return "/";
+  return path.slice(0, 300);
+}

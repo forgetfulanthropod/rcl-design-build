@@ -125,9 +125,16 @@ function download(filename: string, csv: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function TimeView() {
+/** `week`/`onWeek` tie the shown week to the URL (/time?week=…); without them it's local state. */
+export function TimeView({ week: weekProp = "", onWeek }: { week?: string; onWeek?: (week: string) => void } = {}) {
   const online = useOnline();
-  const [week, setWeek] = useState("");
+  const [week, setWeek] = useState(weekProp);
+  useEffect(() => setWeek(weekProp), [weekProp]);
+  useEffect(() => {
+    if (week && week !== weekProp) onWeek?.(week);
+    // Only when the shown week changes; weekProp catches up through the URL.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [week]);
   const [data, setData] = useState<Week | null>(null);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");

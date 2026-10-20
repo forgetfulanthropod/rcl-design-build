@@ -21,7 +21,8 @@ test("closing the photo viewer doesn't steal focus from Your day (no surprise au
   const page = await ctx.newPage();
   await page.goto("/login");
   await page.getByTestId("debug-login").getByRole("button", { name: "Labor", exact: true }).click();
-  await page.waitForURL((u) => u.pathname === "/", { timeout: 30_000 });
+  // F1: "/" redirects to the role's first view.
+  await page.waitForURL((u) => u.pathname !== "/" && u.pathname !== "/login" && !u.pathname.startsWith("/m/"), { timeout: 30_000 });
   await page.getByTestId("photo-input").setInputFiles("e2e/fixtures/site-photo.jpg");
   await expect(page.getByText("1 photo saved.")).toBeVisible({ timeout: 20_000 });
   await page.locator("[data-photo-id]").first().click();
