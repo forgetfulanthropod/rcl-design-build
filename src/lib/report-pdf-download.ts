@@ -1,8 +1,14 @@
 /** Browser side of "Download PDF": fetch what the server allows, build the PDF, save it. */
 import { getReportPdfData, getReportPhoto } from "@/lib/server/fns";
 import { buildReportPdf, reportPdfFileName, type ReportPdfEntry } from "@/lib/report-pdf";
-import { entryStamp } from "@/lib/report-entries";
-import { clock } from "@/components/today-report";
+import { entryStamp, takenLabel } from "@/lib/report-entries";
+import { clock, localDay } from "@/components/today-report";
+
+const TAKEN_FMT = {
+  clock: (v: string) => clock(v),
+  dayKey: (v: string) => localDay(new Date(v)),
+  shortDay: (v: string) => new Date(v).toLocaleDateString([], { month: "short", day: "numeric" }),
+};
 
 export type PdfTarget = { day: string; reportId?: undefined } | { reportId: string; day?: undefined };
 
@@ -42,7 +48,8 @@ export async function downloadReportPdf(target: PdfTarget): Promise<string> {
   const data = await getReportPdfData({ data: target });
   const entries: ReportPdfEntry[] = [];
   for (const e of data.entries) {
-    const stamp = entryStamp(e, (v) => clock(v));
+    const taken = e.kind === "photo" ? takenLabel(e.takenAt, e.createdAt, TAKEN_FMT) : "";
+    const stamp = entryStamp(e, (v) => clock(v)) + (taken ? ` · ${taken}` : "");
     if (e.kind === "text") {
       entries.push({ kind: "text", stamp, body: e.body });
       continue;

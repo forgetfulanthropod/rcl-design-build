@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { can, ForbiddenError } from "@/lib/permissions";
+import { plausibleTakenAt } from "@/lib/photo-upload";
 import { legacyEntries, type ReportEntry, type TextEdit } from "@/lib/report-entries";
 import { addPhotoEntry, backfillEntries, entriesFor, pdfFlags, saveTextEntries } from "./entries.server";
 
@@ -235,7 +236,7 @@ export async function addMyPhoto(
   await sql`
     insert into daily_report_photos (id, report_id, company_id, user_id, mime, bytes, thumb, size_bytes, width, height, taken_at)
     values (${photoId}, ${id}, ${me.companyId}, ${userId}, ${full.mime}, ${full.bytes}, ${thumb.bytes},
-            ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${iso(input.takenAt)})
+            ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${plausibleTakenAt(iso(input.takenAt))})
   `;
   await addPhotoEntry(sql, me, id, photoId);
   return getMyReport(userId, day);
@@ -331,7 +332,10 @@ export async function reportPdfData(userId: string, input: { reportId?: string; 
     lastEditAt: report.lastEditAt,
     lunchMinutes: report.lunchMinutes,
     submittedAt: report.submittedAt,
-    entries: report.entries,
+    entries: report.entries.map((e) => ({
+      ...e,
+      takenAt: e.photoId ? (report.photos.find((p) => p.id === e.photoId)?.takenAt ?? null) : null,
+    })),
   };
 }
 
@@ -435,7 +439,7 @@ export async function reviewReport(userId: string, id: string): Promise<DailyRep
   const sql = await getSql();
   const me = await requirePrincipal(sql, userId);
   const rows = await sql.query<Row>(`${SELECT} where r.company_id = $1 and r.id = $2`, [me.companyId, id]);
-  const [report] = await hydrate(sql, rows);
+  const [report] = await hydrate(sql, rows, me);
   if (!report) throw new Error("Report not found.");
   return report;
 }

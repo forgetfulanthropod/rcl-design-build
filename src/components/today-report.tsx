@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { entryStamp, sortEntries, type ReportEntry } from "@/lib/report-entries";
+import { entryStamp, sortEntries, takenLabel, type ReportEntry } from "@/lib/report-entries";
+import { preparePhoto } from "@/lib/photo-prepare";
+import { tooLargeMessage } from "@/lib/photo-upload";
 import { ReportPdfButton } from "@/components/report-pdf-button";
 import { PDF_OFF_HINT } from "@/lib/report-pdf-download";
 import { lunchStepScroll } from "@/lib/lunch-step";
@@ -28,26 +30,12 @@ export function longDay(day: string): string {
   return new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
 }
 
-async function loadImage(file: File): Promise<HTMLImageElement> {
-  const url = URL.createObjectURL(file);
-  const img = new Image();
-  img.src = url;
-  await img.decode();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return img;
-}
-
-/** Client-side downscale so uploads stay small on bad signal. */
-function scaled(img: HTMLImageElement, max: number, quality: number) {
-  const ratio = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
-  const w = Math.max(1, Math.round(img.naturalWidth * ratio));
-  const h = Math.max(1, Math.round(img.naturalHeight * ratio));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-  return { url: canvas.toDataURL("image/jpeg", quality), w, h };
-}
+const MENU_ITEM = "flex h-16 flex-col items-center justify-center gap-1 rounded-md bg-surface text-base font-medium text-fg";
+const TAKEN_FMT = {
+  clock: (v: string) => clock(v),
+  dayKey: (v: string) => localDay(new Date(v)),
+  shortDay: (v: string) => new Date(v).toLocaleDateString([], { month: "short", day: "numeric" }),
+};
 
 type Pending = { key: string; preview: string; state: "uploading" | "failed"; file: File; addedAt: string };
 
@@ -132,6 +120,7 @@ export function TodayReport() {
   const plusRef = useRef<HTMLButtonElement>(null);
   const firstItem = useRef<HTMLButtonElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const saving = useRef<Promise<void>>(Promise.resolve());
   const [askLunch, setAskLunch] = useState(false);
   const lunchStep = useRef<HTMLElement>(null);
@@ -183,17 +172,16 @@ export function TodayReport() {
 
   async function upload(file: File, key: string) {
     try {
-      const img = await loadImage(file);
-      const full = scaled(img, 1600, 0.82);
-      const thumb = scaled(img, 320, 0.7);
+      const photo = await preparePhoto(file);
       const next = await addMyPhoto({
         data: {
           day,
-          image: full.url,
-          thumb: thumb.url,
-          width: full.w,
-          height: full.h,
-          takenAt: new Date(file.lastModified || Date.now()).toISOString(),
+          image: photo.image,
+          thumb: photo.thumb,
+          width: photo.width,
+          height: photo.height,
+          // Only the camera's own time (EXIF); a file's modified date is often just when it was copied.
+          takenAt: photo.takenAt ?? "",
         },
       });
       setPending((list) => list.filter((p) => p.key !== key));
@@ -208,6 +196,11 @@ export function TodayReport() {
     if (!files) return;
     setError("");
     for (const file of Array.from(files)) {
+      const big = tooLargeMessage(file.size);
+      if (big) {
+        setError(big);
+        continue;
+      }
       const key = `${file.name}-${file.size}-${Math.random()}`;
       setPending((list) => [
         ...list,
@@ -258,6 +251,7 @@ export function TodayReport() {
   const submitted = Boolean(report.submittedAt);
   const photos = report.photos.length;
   const thumbs = new Map(report.photos.map((p) => [p.id, p.thumb]));
+  const takenAt = new Map(report.photos.map((p) => [p.id, p.takenAt]));
   const hasText =
     Object.values(ed.texts).some((t) => t.trim()) || ed.drafts.some((d) => d.body.trim());
 
@@ -374,7 +368,8 @@ export function TodayReport() {
               );
             }
             const e = row.entry;
-            const stamp = entryStamp(e, (v) => clock(v));
+            const taken = e.kind === "photo" ? takenLabel(takenAt.get(e.photoId ?? ""), e.createdAt, TAKEN_FMT) : "";
+            const stamp = entryStamp(e, (v) => clock(v)) + (taken ? ` · ${taken}` : "");
             return (
               <li key={row.key} data-testid="entry" data-kind={e.kind} data-entry-key={row.key} data-entry-id={e.id}>
                 <p className="text-sm text-muted tabular-nums" data-testid="entry-time">
@@ -394,16 +389,30 @@ export function TodayReport() {
           })}
         </ol>
 
+        {/* Library: no `capture`, so phones offer their photo library (several at once). Camera: a new photo. */}
         <input
           ref={photoInput}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
-          capture="environment"
+          accept="image/*,.heic,.heif"
           multiple
           className="sr-only"
           tabIndex={-1}
           aria-hidden="true"
           data-testid="photo-input"
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={cameraInput}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          data-testid="camera-input"
           onChange={(e) => {
             addFiles(e.target.files);
             e.target.value = "";
@@ -416,7 +425,7 @@ export function TodayReport() {
               <div
                 role="menu"
                 aria-label="Add to report"
-                className="mb-2 grid grid-cols-2 gap-2 rounded-md border border-line bg-raised p-2 shadow-lg"
+                className="mb-2 grid grid-cols-3 gap-2 rounded-md border border-line bg-raised p-2 shadow-lg"
                 onKeyDown={(e) => {
                   if (e.key === "Escape") {
                     setMenuOpen(false);
@@ -428,21 +437,32 @@ export function TodayReport() {
                   ref={firstItem}
                   type="button"
                   role="menuitem"
-                  className="flex h-16 items-center justify-center gap-2 rounded-md bg-surface text-lg font-medium text-fg"
+                  className={MENU_ITEM}
                   onClick={addText}
                 >
-                  <span aria-hidden="true">✎</span> Text
+                  <span aria-hidden="true" className="text-2xl leading-none">✎</span> Text
                 </button>
                 <button
                   type="button"
                   role="menuitem"
-                  className="flex h-16 items-center justify-center gap-2 rounded-md bg-surface text-lg font-medium text-fg"
+                  className={MENU_ITEM}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    cameraInput.current?.click();
+                  }}
+                >
+                  <span aria-hidden="true" className="text-2xl leading-none">📷</span> Camera
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={MENU_ITEM}
                   onClick={() => {
                     setMenuOpen(false);
                     photoInput.current?.click();
                   }}
                 >
-                  <span aria-hidden="true">📷</span> Photo
+                  <span aria-hidden="true" className="text-2xl leading-none">🖼</span> Library
                 </button>
               </div>
             ) : null}

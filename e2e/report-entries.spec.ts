@@ -109,7 +109,7 @@ test("labor (phone): the plus adds text and photo entries, in time order with ti
 
   await plus(page).click();
   const menu = page.getByRole("menu", { name: "Add to report" });
-  await expect(menu.getByRole("menuitem")).toHaveText([/Text/, /Photo/]);
+  await expect(menu.getByRole("menuitem")).toHaveText([/Text/, /Camera/, /Library/]);
   for (const item of await menu.getByRole("menuitem").all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(56);
   await expect(menu.getByRole("menuitem", { name: /Text/ })).toBeFocused();
   // Escape closes the menu and puts focus back on the plus.
@@ -119,7 +119,7 @@ test("labor (phone): the plus adds text and photo entries, in time order with ti
 
   await plus(page).click();
   const chooser = page.waitForEvent("filechooser");
-  await page.getByRole("menuitem", { name: /Photo/ }).click();
+  await page.getByRole("menuitem", { name: /Library/ }).click();
   await (await chooser).setFiles("e2e/fixtures/site-photo.jpg");
   await expect(page.getByText(/^1 photo saved\./)).toBeVisible({ timeout: 20_000 });
   await expect(entries(page)).toHaveCount(2);
@@ -279,3 +279,50 @@ for (const role of ["owner", "admin"] as const) {
     }
   });
 }
+
+// Regression (#18 + this PR): /reports/<id> (reviewReport) hydrates with the viewer, so it carries
+// the report's entries and the viewer's PDF flag. Route permissions stay principals-only.
+test("/reports/<id>: Owner/Admin get the report with its entries and canPdf; Lead, Labor and Sub are refused", async ({ browser }) => {
+  const owner = await as(browser, "owner", DESKTOP);
+  const id = await owner.page.evaluate(async () => {
+    const mod = await import("/src/lib/server/fns.ts");
+    const day = (d: Date) => d.toLocaleDateString("en-CA");
+    const to = new Date();
+    const from = new Date(to);
+    from.setDate(from.getDate() - 14);
+    const list = await mod.reviewReports({ data: { from: day(from), to: day(to), projectId: "", personId: "" } });
+    return list.reports.find((r) => r.userName === "Luis Moreno" && r.submittedAt && r.photos.length > 0)?.id ?? "";
+  });
+  expect(id).not.toBe("");
+  await owner.ctx.close();
+
+  for (const role of ["owner", "admin"] as const) {
+    const { ctx, page } = await as(browser, role, DESKTOP);
+    const got = await call(page, "reviewReport", { id });
+    expect(got.ok, role).toBe(true);
+    const report = got.value as { id: string; canPdf: boolean; entries: { kind: string; photoId: string | null }[]; photos: { id: string }[]; narrative: string };
+    expect(report.id).toBe(id);
+    expect(report.canPdf, role).toBe(true);
+    expect(report.entries.filter((e) => e.kind === "photo").map((e) => e.photoId).sort()).toEqual(report.photos.map((p) => p.id).sort());
+    expect(report.entries.some((e) => e.kind === "text")).toBe(report.narrative.trim() !== "");
+    // The page itself: its own URL and title, and a working Download PDF for that report.
+    await page.goto(`/reports/${id}`);
+    await expect(page).toHaveTitle(/report, .* · Reports · RCL$/);
+    const card = page.locator(`[id="report-${id}"]`);
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    const downloading = page.waitForEvent("download");
+    await card.getByRole("button", { name: "Download PDF" }).click();
+    const pdf = await pdfOf(await downloading);
+    expectValidPdf(pdf.raw);
+    expect(pdf.text).toContain(`Author: ${NAME.labor}`);
+    expect((pdf.raw.match(/\/Subtype \/Image/g) ?? []).length).toBe(report.photos.length);
+    await ctx.close();
+  }
+  for (const role of ["lead", "labor", "subcontractor"]) {
+    const { ctx, page } = await as(browser, role);
+    const got = await call(page, "reviewReport", { id });
+    expect(got.ok, role).toBe(false);
+    expect(got.error, role).toMatch(/can't do that|Only an owner or admin/);
+    await ctx.close();
+  }
+});

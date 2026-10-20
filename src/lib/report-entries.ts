@@ -114,3 +114,20 @@ export function entryStamp(entry: Pick<ReportEntry, "createdAt" | "editedAt">, c
   const edited = clock(entry.editedAt);
   return edited === made ? made : `${made} · edited ${edited}`;
 }
+
+/**
+ * "taken 6:45 AM" (or "taken Oct 19, 6:45 AM" on another day) for a photo whose camera time
+ * differs from when it was added by a minute or more; "" otherwise.
+ */
+export function takenLabel(
+  takenAt: string | null | undefined,
+  addedAt: string,
+  fmt: { clock: (iso: string) => string; dayKey: (iso: string) => string; shortDay: (iso: string) => string },
+): string {
+  if (!takenAt) return "";
+  const taken = Date.parse(takenAt);
+  const added = Date.parse(addedAt);
+  if (Number.isNaN(taken) || (!Number.isNaN(added) && Math.abs(added - taken) < 60_000)) return "";
+  const sameDay = !Number.isNaN(added) && fmt.dayKey(takenAt) === fmt.dayKey(addedAt);
+  return `taken ${sameDay ? "" : `${fmt.shortDay(takenAt)}, `}${fmt.clock(takenAt)}`;
+}
