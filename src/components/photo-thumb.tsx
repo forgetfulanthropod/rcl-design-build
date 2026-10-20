@@ -1,6 +1,7 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { getReportPhoto } from "@/lib/server/fns";
+import { userMovedFocus } from "@/lib/focus";
 
 /**
  * Thumbnail that opens the full-size photo (fetched through the authenticated server fn).
@@ -43,6 +44,13 @@ export function PhotoThumb({ id, thumb, alt }: { id: string; thumb: string; alt:
           aria-describedby={undefined}
           className="fixed inset-0 z-50 grid place-items-center p-3 outline-none"
           onClick={() => setOpen(false)}
+          onCloseAutoFocus={(event) => {
+            // Radix returns focus to the thumbnail a tick after close. If the user has already
+            // moved on (e.g. tapped "Your day"), don't pull focus back: that blur would fire the
+            // report's autosave and the field would lose the keyboard mid-word.
+            if (!userMovedFocus(document.activeElement)) return;
+            event.preventDefault();
+          }}
         >
           <Dialog.Title className="sr-only">{alt}</Dialog.Title>
           {full ? (

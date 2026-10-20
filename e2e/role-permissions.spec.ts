@@ -156,6 +156,14 @@ test("F2c (lead): can still open an RFI from Docs", async ({ browser }) => {
   // #17: create form is behind "+ New document", not open on the tab alone.
   await page.getByRole("button", { name: "+ New document" }).click();
   await expect(page.locator("#doc-title")).toBeVisible();
-  expect(await call(page, "createDocument", { kind: "rfi", projectId: "", title: "Which grout color?", body: "", counterparty: "", counterpartyEmail: "", amount: null })).toBe("ok");
+  // F3: RFI needs a job — empty projectId is refused; seed Oak Street succeeds.
+  expect(await call(page, "createDocument", { kind: "rfi", projectId: "", title: "Which grout color?", body: "", counterparty: "", counterpartyEmail: "", amount: null })).toBe("Pick a job.");
+  const board = await page.evaluate(async () => {
+    const { listDocuments } = await import("/src/lib/server/fns.ts") as { listDocuments: () => Promise<{ jobs: { id: string; name: string }[] }> };
+    return listDocuments();
+  });
+  const oak = board.jobs.find((j) => j.name === "Oak Street duplex addition");
+  expect(oak, "seed Oak Street job").toBeTruthy();
+  expect(await call(page, "createDocument", { kind: "rfi", projectId: oak!.id, title: "Which grout color?", body: "", counterparty: "", counterpartyEmail: "", amount: null })).toBe("ok");
   await ctx.close();
 });
