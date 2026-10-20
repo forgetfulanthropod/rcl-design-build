@@ -356,7 +356,6 @@ export async function attentionSummary(
   return { ...base, status: "ok", items, generatedAt: new Date().toISOString() };
 }
 
-
 /** One report by id, for /reports/$reportId (spec 05 · F1). Principals only, own company only. */
 export async function reviewReport(userId: string, id: string): Promise<DailyReport> {
   const sql = await getSql();
@@ -365,4 +364,28 @@ export async function reviewReport(userId: string, id: string): Promise<DailyRep
   const [report] = await hydrate(sql, rows);
   if (!report) throw new Error("Report not found.");
   return report;
+}
+
+/** Report-based hints for the form job default (spec 05 · F3). See src/lib/current-job.ts. */
+export async function jobHints(userId: string, day: string): Promise<import("@/lib/current-job").JobHints> {
+  const sql = await getSql();
+  const me = await member(sql, userId);
+  const reports = await sql<{ day: unknown; project_id: string | null }>`
+    select r.day, r.project_id from daily_reports r
+    join projects p on p.id = r.project_id and p.archived = false
+    where r.company_id = ${me.companyId} and r.user_id = ${me.userId} and r.project_id is not null
+      and r.day between (${day}::date - 14) and ${day}::date
+    order by r.day desc
+    limit 2
+  `;
+  const active = await sql<{ id: string }>`
+    select id from projects where company_id = ${me.companyId} and archived = false order by name asc
+  `;
+  const first = reports[0];
+  const isToday = first ? dayString(first.day) === day : false;
+  return {
+    todayJobId: isToday && first ? text(first.project_id) : null,
+    recentJobId: first ? text(first.project_id) : null,
+    activeJobIds: active.map((row) => text(row.id)),
+  };
 }

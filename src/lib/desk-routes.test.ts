@@ -63,3 +63,22 @@ test("deep links: the shell redirects only once the router has settled", () => {
   // Desk not loaded yet: no role, no redirect.
   assert.equal(deskRedirect("", "/", true), null);
 });
+
+test("deep links: Crew (spec 01) and Sharing settings (spec 06) have URLs, for the roles that have them", () => {
+  assert.equal(viewForPath("/crew"), "crew");
+  assert.equal(viewForPath("/settings"), "settings");
+  for (const role of ["owner", "admin"]) {
+    assert.ok(canOpen(role, "crew"), role);
+    assert.ok(canOpen(role, "settings"), role);
+  }
+  assert.ok(canOpen("lead", "crew"));
+  assert.equal(canOpen("lead", "settings"), false);
+  for (const role of ["labor", "subcontractor"]) {
+    assert.equal(canOpen(role, "crew"), false, role);
+    assert.equal(canOpen(role, "settings"), false, role);
+  }
+  assert.equal(pageTitle("settings"), "Sharing settings · RCL");
+  assert.equal(pageTitle("crew"), "Crew · RCL");
+  assert.deepEqual(deskRedirect("labor", "/crew", true), { to: "/today", notice: NOT_ON_DESK });
+  assert.deepEqual(deskRedirect("lead", "/settings", true), { to: "/today", notice: NOT_ON_DESK });
+});

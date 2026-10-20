@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { assertCan, can } from "@/lib/permissions";
 import { member } from "@/lib/server/reports.server";
+import { activityMayBeCompanyWide, requireJob } from "@/lib/current-job";
 
 export type ActivityCard = {
   id: string;
@@ -209,6 +210,7 @@ export async function createActivity(
   const me = await member(sql, userId);
   assertCan(me.role, "activity.add");
   const projectId = await jobInCompany(sql, me.companyId, input.projectId);
+  requireJob(projectId, activityMayBeCompanyWide(me.role));
   await sql`
     insert into activities (id, company_id, project_id, day, title, detail, created_by, updated_by)
     values (
@@ -235,6 +237,7 @@ export async function updateActivity(
     throw new Error("A lead already approved this. Ask them to change it.");
   }
   const projectId = await jobInCompany(sql, me.companyId, input.projectId);
+  requireJob(projectId, activityMayBeCompanyWide(me.role));
   await sql`
     update activities
     set title = ${input.title}, detail = ${input.detail}, project_id = ${projectId},

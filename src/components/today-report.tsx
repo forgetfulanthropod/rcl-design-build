@@ -4,6 +4,8 @@ import { addMyPhoto, getMyReport, saveMyReport, submitMyReport } from "@/lib/ser
 import { LunchDial } from "@/components/lunch-dial";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import { PhotoThumb } from "@/components/photo-thumb";
+import { YoureOnCard } from "@/components/crew-view";
+import { currentJobId, rememberJob } from "@/lib/use-current-job";
 
 type Loaded = Awaited<ReturnType<typeof getMyReport>>;
 type Report = Loaded["report"];
@@ -74,6 +76,17 @@ export function TodayReport() {
     setNarrative(next.report.narrative);
     setProjectId(next.report.projectId ?? "");
     setSaved({ narrative: next.report.narrative, projectId: next.report.projectId ?? "" });
+    // A report with no job yet starts on the current job (spec 05 · F3). It's stored with the
+    // first save, so opening Today doesn't make the report dirty.
+    if (!next.report.projectId && !next.report.submittedAt && next.jobs.length) {
+      void currentJobId()
+        .then((id) => {
+          if (!id || !next.jobs.some((j) => j.id === id)) return;
+          setProjectId((value) => value || id);
+          setSaved((value) => (value.projectId ? value : { ...value, projectId: id }));
+        })
+        .catch(() => undefined);
+    }
   }
 
   useEffect(() => {
@@ -137,6 +150,7 @@ export function TodayReport() {
 
   return (
     <div className="mx-auto grid max-w-xl gap-4" data-testid="today-report">
+      <YoureOnCard />
       <section className="rounded-md border border-line bg-surface p-4">
         <p className="text-sm font-medium uppercase tracking-widest text-copper">Daily report</p>
         <h2 className="mt-1 text-2xl">{longDay(day)}</h2>
@@ -236,7 +250,10 @@ export function TodayReport() {
               className="field mt-1"
               value={projectId}
               disabled={submitted}
-              onChange={(e) => setProjectId(e.target.value)}
+              onChange={(e) => {
+                setProjectId(e.target.value);
+                rememberJob(e.target.value);
+              }}
               onBlur={() => void save()}
             >
               <option value="">No job</option>

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ACTIONS, assertCan, can, invitableRoles, navFor, redactForRole } from "./permissions.ts";
+import { ACTIONS, SHARING_GRANTS, assertCan, assertCanWith, can, canWith, invitableRoles, navFor, redactForRole } from "./permissions.ts";
+import { SHARING_DEFAULTS } from "./sharing.ts";
 import { normalizeRole, roleLabel, ROLES } from "./roles.ts";
 
 test("legacy roles map to personas", () => {
@@ -46,14 +47,29 @@ test("unknown role can do nothing", () => {
   for (const a of ACTIONS) assert.equal(can("hacker", a), false);
 });
 
-test("nav never exceeds 5 tabs and field roles get their own set", () => {
-  for (const r of ROLES) assert.ok(navFor(r).length <= 5, r);
+test("nav stays compact; Owner/Admin/Lead get Crew (spec 01); Labor/Sub do not", () => {
+  for (const r of ROLES) assert.ok(navFor(r).length <= 6, r);
   assert.deepEqual(navFor("labor"), ["today", "mine", "activities", "docs", "safety"]);
   assert.deepEqual(navFor("sub"), ["today", "mine", "docs"]);
-  assert.deepEqual(navFor("lead"), ["today", "mine", "activities", "docs", "safety"]);
+  assert.deepEqual(navFor("lead"), ["today", "mine", "crew", "activities", "docs", "safety"]);
   for (const r of ["owner", "admin", "superadmin"]) {
-    assert.deepEqual(navFor(r), ["reports", "attention", "activities", "docs", "safety"], r);
+    assert.deepEqual(navFor(r), ["reports", "attention", "crew", "activities", "docs", "safety"], r);
   }
+});
+
+test("crew board actions: Owner/Admin/Lead assign; Labor/Sub only myWeek", () => {
+  for (const a of ["crew.board.view", "crew.assign", "crew.publish", "crew.unavailable.confirm"] as const) {
+    assert.equal(can("owner", a), true, a);
+    assert.equal(can("admin", a), true, a);
+    assert.equal(can("lead", a), true, a);
+    assert.equal(can("labor", a), false, a);
+    assert.equal(can("sub", a), false, a);
+  }
+  assert.equal(can("owner", "skill.manage"), true);
+  assert.equal(can("admin", "skill.manage"), true);
+  assert.equal(can("lead", "skill.manage"), false);
+  assert.equal(can("labor", "skill.manage"), false);
+  for (const r of ROLES) assert.equal(can(r, "crew.myWeek"), true, r);
 });
 
 test("invitable roles", () => {
@@ -111,9 +127,8 @@ test("activities: owner and admin can add, edit and approve (spec 05 · F2a)", (
   }
 });
 
-// Spec 05 · F2c changed this on purpose: labor and subs read documents but no longer create
-// them (RFIs included). Labor's doc.send stays until 06's sharing setting replaces it.
-test("documents: labor and subs read documents, the lead runs the pipeline, only principals approve money", () => {
+// Spec 05 · F2c: labor/sub read only. Spec 06: Labor doc.send is off unless labor_doc_send is On.
+test("documents: labor and subs read documents; sending is a setting; the lead runs the pipeline, only principals approve money", () => {
   assert.equal(can("labor", "doc.view"), true);
   assert.equal(can("sub", "doc.view"), true);
   for (const r of ["labor", "sub"]) {
@@ -122,7 +137,7 @@ test("documents: labor and subs read documents, the lead runs the pipeline, only
     assert.throws(() => assertCan(r, "doc.create"), /can't do that/);
   }
   for (const r of ["lead", "owner", "admin", "superadmin"]) assert.equal(can(r, "doc.create"), true, r);
-  assert.equal(can("labor", "doc.send"), true); // flips to false with 06 (sharing settings)
+  assert.equal(can("labor", "doc.send"), false); // spec 06: granted only by labor_doc_send
   assert.equal(can("labor", "doc.status"), false);
   assert.equal(can("sub", "doc.send"), false);
   assert.equal(can("lead", "doc.status"), true);
@@ -135,4 +150,38 @@ test("daily reports: everyone writes, only principals review", () => {
   for (const r of ["labor", "sub", "lead", "owner", "admin", "superadmin"]) assert.ok(can(r, "report.write"), r);
   for (const r of ["labor", "sub", "lead"]) assert.ok(!can(r, "report.review"), r);
   for (const r of ["owner", "admin", "superadmin"]) assert.ok(can(r, "report.review"), r);
+});
+
+test("sharing grants (spec 06): settings add on top of the role matrix and never take away", () => {
+  const off = { ...SHARING_DEFAULTS };
+  const laborSend = { ...SHARING_DEFAULTS, labor_doc_send: true };
+  const leadDollars = { ...SHARING_DEFAULTS, lead_budget_dollars: true };
+  const everything = { lead_budget_dollars: true, labor_doc_send: true };
+  // doc.send
+  assert.equal(canWith("labor", "doc.send", off), false);
+  assert.equal(canWith("labor", "doc.send", laborSend), true);
+  assert.equal(canWith("sub", "doc.send", laborSend), false);
+  assert.equal(canWith("subcontractor", "doc.send", everything), false);
+  assert.equal(canWith("lead", "doc.send", off), true); // unchanged
+  assert.throws(() => assertCanWith("labor", "doc.send", off), /can't do that \(doc\.send\)/);
+  assert.doesNotThrow(() => assertCanWith("labor", "doc.send", laborSend));
+  // budget.dollars
+  assert.equal(can("lead", "budget.dollars"), false);
+  assert.equal(canWith("lead", "budget.dollars", leadDollars), true);
+  assert.equal(canWith("labor", "budget.dollars", leadDollars), false);
+  for (const r of ["owner", "admin", "superadmin"]) assert.equal(can(r, "budget.dollars"), true, r);
+  // money.view (bids, invoices, contract values) is never granted by a setting
+  for (const r of ["lead", "labor", "sub"]) assert.equal(canWith(r, "money.view", everything), false, r);
+  // only the two documented grants exist
+  assert.deepEqual(Object.keys(SHARING_GRANTS).sort(), ["budget.dollars", "doc.send"]);
+  // never subtracts: a principal keeps everything with every setting off
+  for (const action of ACTIONS) assert.equal(canWith("owner", action, off), can("owner", action), action);
+});
+
+test("sharing settings and the per-job review are owner, admin and superadmin only (spec 06)", () => {
+  for (const action of ["settings.sharing.view", "settings.sharing.edit", "project.sharingReview"] as const) {
+    for (const r of ["owner", "admin", "superadmin"]) assert.equal(can(r, action), true, `${r} ${action}`);
+    for (const r of ["lead", "labor", "sub"]) assert.equal(can(r, action), false, `${r} ${action}`);
+    for (const r of ["lead", "labor", "sub"]) assert.equal(canWith(r, action, { lead_budget_dollars: true, labor_doc_send: true }), false, `${r} ${action}`);
+  }
 });

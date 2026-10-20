@@ -1,3 +1,6 @@
+import { JobSelect } from "@/components/job-select";
+import { useCurrentJob } from "@/lib/use-current-job";
+import { docMayBeCompanyWide } from "@/lib/current-job";
 import { useEffect, useState } from "react";
 import { createDocument, fileDocumentReply, listDocuments, sendDocument, setDocumentStatus } from "@/lib/server/fns";
 import { Drawer } from "vaul";
@@ -125,7 +128,8 @@ export function DocumentsView({
   const openId = docId ?? openState;
   const setOpenId = (next: string) => (onOpenDoc ? onOpenDoc(next) : setOpenState(next));
   const [kind, setKind] = useState<DocKind>("rfi");
-  const [projectId, setProjectId] = useState("");
+  const job = useCurrentJob();
+  const projectId = job.projectId;
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [who, setWho] = useState("");
@@ -331,13 +335,7 @@ export function DocumentsView({
                     <option key={item} value={item}>{DOC_LABEL[item]}</option>
                   ))}
                 </select>
-                <label className="text-sm text-muted" htmlFor="doc-job">Job</label>
-                <select id="doc-job" className="field" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-                  <option value="">No job</option>
-                  {board.jobs.map((job) => (
-                    <option key={job.id} value={job.id}>{job.name}</option>
-                  ))}
-                </select>
+                <JobSelect id="doc-job" jobs={board.jobs} value={projectId} onChange={job.setProjectId} companyWide={docMayBeCompanyWide(createKind)} currentHint={job.isCurrent} />
                 <label className="text-sm text-muted" htmlFor="doc-title">Subject <span aria-hidden="true">*</span></label>
                 <input id="doc-title" className="field" required value={title} onChange={(event) => setTitle(event.target.value)} />
                 <label className="text-sm text-muted" htmlFor="doc-body">Details</label>
@@ -357,7 +355,7 @@ export function DocumentsView({
                   </>
                 ) : null}
                 <div className="grid grid-cols-2 gap-2">
-                  <BigButton type="submit" disabled={busy || !title.trim()}>
+                  <BigButton type="submit" disabled={busy || !title.trim() || (!projectId && !docMayBeCompanyWide(createKind))}>
                     {addButtonLabel(createKind)}
                   </BigButton>
                   <Button type="button" tone="ghost" className="h-14" onClick={() => setCreating(false)}>
@@ -476,7 +474,7 @@ function DocumentDetail({
           </article>
         ))}
       </section>
-      {board.canSend ? (
+      {doc.canSend ? (
         <form className="grid gap-2 rounded-md border border-line bg-surface p-4" onSubmit={(event) => event.preventDefault()}>
           <label className="text-sm text-muted" htmlFor="send-to">To</label>
           <input id="send-to" className="field" type="email" value={sendTo} onChange={(event) => setSendTo(event.target.value)} />
@@ -496,6 +494,10 @@ function DocumentDetail({
             File reply
           </Button>
         </form>
+      ) : board.sendOffHint ? (
+        <p className="rounded-md border border-line bg-surface p-4 text-base text-muted" data-testid="send-off">
+          {board.sendOffHint}
+        </p>
       ) : null}
     </div>
   );

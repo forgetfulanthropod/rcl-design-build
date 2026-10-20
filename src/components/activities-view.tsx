@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { approveActivity, createActivity, listActivities, overviewActivities, updateActivity } from "@/lib/server/fns";
 import { localDay, longDay } from "@/components/today-report";
 import { DocumentRail } from "@/components/documents-view";
+import { JobSelect } from "@/components/job-select";
+import { useCurrentJob } from "@/lib/use-current-job";
 import { BigButton, Button, EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 
 type Board = Awaited<ReturnType<typeof listActivities>>;
@@ -31,7 +33,7 @@ export function ActivitiesView({
   const [error, setError] = useState("");
   const [title, setTitle] = useState("");
   const [detail, setDetail] = useState("");
-  const [projectId, setProjectId] = useState("");
+  const job = useCurrentJob();
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -104,10 +106,11 @@ export function ActivitiesView({
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!title.trim()) return;
-                void run(createActivity({ data: { day, title, detail, projectId } }), () => {
+                if (!job.projectId) return setError("Pick a job.");
+                void run(createActivity({ data: { day, title, detail, projectId: job.projectId } }), () => {
                   setTitle("");
                   setDetail("");
-                  setProjectId("");
+                  job.reset();
                 });
               }}
             >
@@ -130,18 +133,8 @@ export function ActivitiesView({
                 value={detail}
                 onChange={(event) => setDetail(event.target.value)}
               />
-              <label className="text-sm text-muted" htmlFor="act-job">
-                Job
-              </label>
-              <select id="act-job" className="field" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-                <option value="">No job</option>
-                {board.jobs.map((job) => (
-                  <option key={job.id} value={job.id}>
-                    {job.name}
-                  </option>
-                ))}
-              </select>
-              <BigButton type="submit" disabled={busy || !title.trim()}>
+              <JobSelect id="act-job" jobs={board.jobs} value={job.projectId} onChange={job.setProjectId} currentHint={job.isCurrent} />
+              <BigButton type="submit" disabled={busy || !title.trim() || !job.projectId}>
                 Add activity
               </BigButton>
             </form>
@@ -170,16 +163,9 @@ export function ActivitiesView({
                       >
                         <input className="field" aria-label="Activity title" value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
                         <textarea className="field min-h-20" aria-label="Activity detail" value={editDetail} onChange={(event) => setEditDetail(event.target.value)} />
-                        <select className="field" aria-label="Job" value={editProject} onChange={(event) => setEditProject(event.target.value)}>
-                          <option value="">No job</option>
-                          {board.jobs.map((job) => (
-                            <option key={job.id} value={job.id}>
-                              {job.name}
-                            </option>
-                          ))}
-                        </select>
+                        <JobSelect id={`act-edit-job-${card.id}`} jobs={board.jobs} value={editProject} onChange={setEditProject} labelClassName="sr-only" />
                         <div className="grid grid-cols-2 gap-2">
-                          <Button type="submit" disabled={busy || !editTitle.trim()}>
+                          <Button type="submit" disabled={busy || !editTitle.trim() || !editProject}>
                             Save
                           </Button>
                           <Button type="button" tone="ghost" onClick={() => setEditing(null)}>

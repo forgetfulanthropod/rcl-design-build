@@ -41,9 +41,9 @@ test("navigation is tiny and role-based; hidden features are gone from nav", asy
   for (const [role, tabs] of [
     ["labor", ["Today", "My reports", "Activities", "Docs", "Safety"]],
     ["subcontractor", ["Today", "My reports", "Docs"]],
-    ["lead", ["Today", "My reports", "Activities", "Docs", "Safety"]],
-    ["owner", ["Reports", "Attention", "Activities", "Docs", "Safety"]],
-    ["admin", ["Reports", "Attention", "Activities", "Docs", "Safety"]],
+    ["lead", ["Today", "My reports", "Crew", "Activities", "Docs", "Safety"]],
+    ["owner", ["Reports", "Attention", "Crew", "Activities", "Docs", "Safety"]],
+    ["admin", ["Reports", "Attention", "Crew", "Activities", "Docs", "Safety"]],
   ] as const) {
     const { ctx, page } = await as(browser, role);
     const bar = page.getByRole("navigation", { name: "Main" });
@@ -234,7 +234,12 @@ test("attention: AI summary lists items with citations, is cached, and links to 
   // Citation jumps to the report.
   const cite = list.getByRole("button", { name: /From .+'s report/ }).first();
   const who = ((await cite.textContent()) ?? "").match(/From (.+)'s report/)![1];
-  await cite.click();
+  // The pinned sharing-review section makes Attention tall on a phone; Playwright's scroll then
+  // parks the citation under the fixed bottom nav. scroll-mb-24 helps, and a DOM click is reliable.
+  await cite.evaluate((el: HTMLElement) => {
+    el.scrollIntoView({ block: "center", inline: "nearest" });
+    el.click();
+  });
   await expect(nav(page, "Reports")).toHaveAttribute("aria-current", "page");
   await expect(page.locator("article.border-copper")).toContainText(who);
   await ctx.close();
@@ -248,11 +253,11 @@ test("attention: AI summary lists items with citations, is cached, and links to 
 });
 
 // ---- Spec 05 · F1: deep links. Every view has a URL; reload, back/forward and links work. ----
-const ALL_VIEWS = ["/today", "/mine", "/reports", "/attention", "/activities", "/safety", "/docs", "/team"] as const;
+const ALL_VIEWS = ["/today", "/mine", "/reports", "/attention", "/crew", "/activities", "/safety", "/docs", "/team", "/settings"] as const;
 const DESK: Record<string, { views: string[]; home: string }> = {
-  owner: { views: ["/reports", "/attention", "/activities", "/docs", "/safety", "/team"], home: "/reports" },
-  admin: { views: ["/reports", "/attention", "/activities", "/docs", "/safety", "/team"], home: "/reports" },
-  lead: { views: ["/today", "/mine", "/activities", "/docs", "/safety"], home: "/today" },
+  owner: { views: ["/reports", "/attention", "/crew", "/activities", "/docs", "/safety", "/team", "/settings"], home: "/reports" },
+  admin: { views: ["/reports", "/attention", "/crew", "/activities", "/docs", "/safety", "/team", "/settings"], home: "/reports" },
+  lead: { views: ["/today", "/mine", "/crew", "/activities", "/docs", "/safety"], home: "/today" },
   labor: { views: ["/today", "/mine", "/activities", "/docs", "/safety"], home: "/today" },
   subcontractor: { views: ["/today", "/mine", "/docs"], home: "/today" },
 };
@@ -261,10 +266,12 @@ const TITLE: Record<string, string> = {
   "/mine": "My reports",
   "/reports": "Reports",
   "/attention": "Attention",
+  "/crew": "Crew",
   "/activities": "Activities",
   "/safety": "Safety",
   "/docs": "Docs",
   "/team": "Team",
+  "/settings": "Sharing settings",
 };
 
 for (const role of Object.keys(DESK)) {
@@ -316,7 +323,7 @@ test("F1 (owner): no nav is clickable on \"/\" before the redirect lands (a clic
 
 test("F1 (lead): each nav click changes the URL and marks the current tab; back/forward work", async ({ browser }) => {
   const { ctx, page } = await as(browser, "lead", DESKTOP);
-  for (const [label, path] of [["My reports", "/mine"], ["Activities", "/activities"], ["Docs", "/docs"], ["Safety", "/safety"], ["Today", "/today"]]) {
+  for (const [label, path] of [["My reports", "/mine"], ["Crew", "/crew"], ["Activities", "/activities"], ["Docs", "/docs"], ["Safety", "/safety"], ["Today", "/today"]]) {
     await nav(page, label).click();
     await expect(page).toHaveURL((u) => u.pathname === path);
     await expect(nav(page, label)).toHaveAttribute("aria-current", "page");
@@ -340,6 +347,22 @@ test("F1 (owner): report filters live in the URL and survive reload", async ({ b
   await page.reload();
   await expect(page.locator("#rv-from")).toHaveValue("2026-01-05");
   await expect(page.locator("#rv-to")).toHaveValue("2026-01-12");
+  await ctx.close();
+});
+
+test("F1 (owner): Attention's sharing Review opens /settings?project=<id>, which survives reload and Back", async ({ browser }) => {
+  const { ctx, page } = await as(browser, "owner", DESKTOP);
+  await nav(page, "Attention").click();
+  await page.getByTestId("sharing-review-section").getByRole("button", { name: /^Review / }).first().click();
+  await expect(page).toHaveURL((u) => u.pathname === "/settings" && Boolean(u.searchParams.get("project")));
+  await expect(page.getByTestId("review-banner")).toBeVisible();
+  await expect(page).toHaveTitle("Sharing settings · RCL");
+  const url = page.url();
+  await page.reload();
+  await expect(page).toHaveURL(url);
+  await expect(page.getByTestId("review-banner")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL((u) => u.pathname === "/attention");
   await ctx.close();
 });
 
@@ -409,4 +432,49 @@ test("F1 (owner): a single report has its own URL; another company gets Not foun
   await other.page.goto(`/reports/${reportId}`);
   await expect(other.page.getByTestId("report-missing")).toContainText("Not found");
   await other.context.close();
+});
+
+test("sharing (spec 06): Owner turns Labor sending on for Whitaker; Luis sees Send on a Whitaker RFI but not on an Oak Street one", async ({ browser }) => {
+  type Fn = (a: { data?: unknown }) => Promise<unknown>;
+  const fn = (page: Page, name: string, data?: unknown) =>
+    page.evaluate(
+      async ([n, d]) => ((await import("/src/lib/server/fns.ts")) as unknown as Record<string, Fn>)[n as string]({ data: d }),
+      [name, data] as const,
+    );
+
+  // F2c: Labor can no longer create documents. Lead files the Oak Street RFI; demo Whitaker RFI is already Luis's.
+  const lead = await as(browser, "lead", DESKTOP);
+  const board = (await fn(lead.page, "listDocuments")) as { jobs: { id: string; name: string }[] };
+  const oak = board.jobs.find((j) => j.name === "Oak Street duplex addition")!;
+  await fn(lead.page, "createDocument", { kind: "rfi", projectId: oak.id, title: "Rear stair landing height", body: "", counterparty: "", counterpartyEmail: "", amount: null });
+  await lead.ctx.close();
+
+  // Owner: override on Whitaker, then mark Whitaker (only) reviewed through the dialog.
+  const owner = await as(browser, "owner", DESKTOP);
+  await owner.page.getByRole("button", { name: /^Settings/ }).click();
+  await owner.page.getByRole("tab", { name: "Projects" }).click();
+  await owner.page.getByRole("button", { name: "Review Whitaker kitchen remodel" }).click();
+  await owner.page.getByTestId("project-labor_doc_send").getByRole("radio", { name: "On" }).click();
+  await expect(owner.page.getByTestId("project-labor_doc_send")).toContainText("Applies after review");
+  await owner.page.getByTestId("review-banner").getByRole("button", { name: "Mark reviewed" }).click();
+  await owner.page.getByRole("dialog").getByRole("button", { name: "Mark reviewed" }).click();
+  await expect(owner.page.getByTestId("reviewed-line")).toBeVisible();
+  await owner.ctx.close();
+
+  const luis = await as(browser, "labor", DESKTOP);
+  const openDoc = async (title: string) => {
+    await nav(luis.page, "Docs").click();
+    // #17: Document sections are role=tab
+    await luis.page.getByRole("tablist", { name: "Document sections" }).getByRole("tab", { name: "Change management" }).click();
+    await luis.page.getByRole("button", { name: new RegExp(title) }).click();
+  };
+  await openDoc("Pocket door at the pantry");
+  await expect(luis.page.getByRole("button", { name: /Send with Resend|Queue on Resend/ })).toBeVisible();
+  await expect(luis.page.getByRole("button", { name: "Open in Gmail" })).toBeVisible();
+  await expect(luis.page.getByTestId("send-off")).toHaveCount(0);
+  await luis.page.getByRole("button", { name: "All documents" }).click();
+  await openDoc("Rear stair landing height");
+  await expect(luis.page.getByRole("button", { name: /Send with Resend|Queue on Resend/ })).toHaveCount(0);
+  await expect(luis.page.getByTestId("send-off")).toHaveText("Sending is off for this job.");
+  await luis.ctx.close();
 });

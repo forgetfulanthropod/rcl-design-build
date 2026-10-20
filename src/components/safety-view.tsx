@@ -1,3 +1,5 @@
+import { JobSelect } from "@/components/job-select";
+import { useCurrentJob } from "@/lib/use-current-job";
 import { useEffect, useState } from "react";
 import { addTraining, approveJsa, getSafety, recordInspection, saveJsa, saveOrientation } from "@/lib/server/fns";
 import { localDay } from "@/components/today-report";
@@ -16,7 +18,7 @@ export function SafetyView() {
   const [desk, setDesk] = useState<Desk | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [projectId, setProjectId] = useState("");
+  const job = useCurrentJob();
   const [hazards, setHazards] = useState("");
   const [controls, setControls] = useState("");
   const [inspectJob, setInspectJob] = useState("");
@@ -169,25 +171,19 @@ export function SafetyView() {
                 className="mt-3 grid gap-2"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void run(saveJsa({ data: { day, projectId, hazards, controls } })).then((ok) => {
+                  void run(saveJsa({ data: { day, projectId: job.projectId, hazards, controls } })).then((ok) => {
                     if (!ok) return;
                     setHazards("");
                     setControls("");
                   });
                 }}
               >
-                <label className="text-sm text-muted" htmlFor="jsa-job">Job</label>
-                <select id="jsa-job" className="field" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-                  <option value="">No job</option>
-                  {desk.jobs.map((job) => (
-                    <option key={job.id} value={job.id}>{job.name}</option>
-                  ))}
-                </select>
+                <JobSelect id="jsa-job" jobs={desk.jobs} value={job.projectId} onChange={job.setProjectId} currentHint={job.isCurrent} />
                 <label className="text-sm text-muted" htmlFor="jsa-hazards">Hazards</label>
                 <textarea id="jsa-hazards" className="field min-h-20" value={hazards} onChange={(event) => setHazards(event.target.value)} />
                 <label className="text-sm text-muted" htmlFor="jsa-controls">Controls</label>
                 <textarea id="jsa-controls" className="field min-h-20" value={controls} onChange={(event) => setControls(event.target.value)} />
-                <BigButton type="submit" disabled={busy || !hazards.trim() || !controls.trim()}>
+                <BigButton type="submit" disabled={busy || !hazards.trim() || !controls.trim() || !job.projectId}>
                   Save analysis
                 </BigButton>
               </form>

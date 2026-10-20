@@ -14,8 +14,10 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DeskIndexRouteImport } from './routes/_desk.index'
 import { Route as DeskActivitiesRouteImport } from './routes/_desk.activities'
 import { Route as DeskAttentionRouteImport } from './routes/_desk.attention'
+import { Route as DeskCrewRouteImport } from './routes/_desk.crew'
 import { Route as DeskMineRouteImport } from './routes/_desk.mine'
 import { Route as DeskSafetyRouteImport } from './routes/_desk.safety'
+import { Route as DeskSettingsRouteImport } from './routes/_desk.settings'
 import { Route as DeskTeamRouteImport } from './routes/_desk.team'
 import { Route as DeskTodayRouteImport } from './routes/_desk.today'
 import { Route as MTokenRouteImport } from './routes/m.$token'
@@ -50,6 +52,11 @@ const DeskAttentionRoute = DeskAttentionRouteImport.update({
   path: '/attention',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskCrewRoute = DeskCrewRouteImport.update({
+  id: '/crew',
+  path: '/crew',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskMineRoute = DeskMineRouteImport.update({
   id: '/mine',
   path: '/mine',
@@ -58,6 +65,11 @@ const DeskMineRoute = DeskMineRouteImport.update({
 const DeskSafetyRoute = DeskSafetyRouteImport.update({
   id: '/safety',
   path: '/safety',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskSettingsRoute = DeskSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => DeskRoute,
 } as any)
 const DeskTeamRoute = DeskTeamRouteImport.update({
@@ -111,8 +123,10 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/activities': typeof DeskActivitiesRoute
   '/attention': typeof DeskAttentionRoute
+  '/crew': typeof DeskCrewRoute
   '/mine': typeof DeskMineRoute
   '/safety': typeof DeskSafetyRoute
+  '/settings': typeof DeskSettingsRoute
   '/team': typeof DeskTeamRoute
   '/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
@@ -127,8 +141,10 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/activities': typeof DeskActivitiesRoute
   '/attention': typeof DeskAttentionRoute
+  '/crew': typeof DeskCrewRoute
   '/mine': typeof DeskMineRoute
   '/safety': typeof DeskSafetyRoute
+  '/settings': typeof DeskSettingsRoute
   '/team': typeof DeskTeamRoute
   '/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
@@ -146,8 +162,10 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_desk/activities': typeof DeskActivitiesRoute
   '/_desk/attention': typeof DeskAttentionRoute
+  '/_desk/crew': typeof DeskCrewRoute
   '/_desk/mine': typeof DeskMineRoute
   '/_desk/safety': typeof DeskSafetyRoute
+  '/_desk/settings': typeof DeskSettingsRoute
   '/_desk/team': typeof DeskTeamRoute
   '/_desk/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
@@ -166,8 +184,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/activities'
     | '/attention'
+    | '/crew'
     | '/mine'
     | '/safety'
+    | '/settings'
     | '/team'
     | '/today'
     | '/m/$token'
@@ -182,8 +202,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/activities'
     | '/attention'
+    | '/crew'
     | '/mine'
     | '/safety'
+    | '/settings'
     | '/team'
     | '/today'
     | '/m/$token'
@@ -200,8 +222,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/_desk/activities'
     | '/_desk/attention'
+    | '/_desk/crew'
     | '/_desk/mine'
     | '/_desk/safety'
+    | '/_desk/settings'
     | '/_desk/team'
     | '/_desk/today'
     | '/m/$token'
@@ -259,6 +283,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskAttentionRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/_desk/crew': {
+      id: '/_desk/crew'
+      path: '/crew'
+      fullPath: '/crew'
+      preLoaderRoute: typeof DeskCrewRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/_desk/mine': {
       id: '/_desk/mine'
       path: '/mine'
@@ -271,6 +302,13 @@ declare module '@tanstack/react-router' {
       path: '/safety'
       fullPath: '/safety'
       preLoaderRoute: typeof DeskSafetyRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/settings': {
+      id: '/_desk/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof DeskSettingsRouteImport
       parentRoute: typeof DeskRoute
     }
     '/_desk/team': {
@@ -342,8 +380,10 @@ declare module '@tanstack/react-router' {
 interface DeskRouteChildren {
   DeskActivitiesRoute: typeof DeskActivitiesRoute
   DeskAttentionRoute: typeof DeskAttentionRoute
+  DeskCrewRoute: typeof DeskCrewRoute
   DeskMineRoute: typeof DeskMineRoute
   DeskSafetyRoute: typeof DeskSafetyRoute
+  DeskSettingsRoute: typeof DeskSettingsRoute
   DeskTeamRoute: typeof DeskTeamRoute
   DeskTodayRoute: typeof DeskTodayRoute
   DeskIndexRoute: typeof DeskIndexRoute
@@ -356,8 +396,10 @@ interface DeskRouteChildren {
 const DeskRouteChildren: DeskRouteChildren = {
   DeskActivitiesRoute: DeskActivitiesRoute,
   DeskAttentionRoute: DeskAttentionRoute,
+  DeskCrewRoute: DeskCrewRoute,
   DeskMineRoute: DeskMineRoute,
   DeskSafetyRoute: DeskSafetyRoute,
+  DeskSettingsRoute: DeskSettingsRoute,
   DeskTeamRoute: DeskTeamRoute,
   DeskTodayRoute: DeskTodayRoute,
   DeskIndexRoute: DeskIndexRoute,

@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { DeskContext, type DeskResult } from "@/components/desk-context";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { AlertTriangle, ClipboardList, Files, History, ListChecks, NotebookPen, ShieldCheck, Users } from "lucide-react";
+import { AlertTriangle, CalendarRange, ClipboardList, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
-import { completeSetup, loadDesk } from "@/lib/server/fns";
+import { completeSetup, getSharingReviewCount, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
 import { navFor } from "@/lib/permissions";
@@ -22,6 +22,7 @@ const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
   { id: "mine", label: "My reports", icon: History },
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "attention", label: "Attention", icon: AlertTriangle },
+  { id: "crew", label: "Crew", icon: CalendarRange },
   { id: "activities", label: "Activities", icon: ListChecks },
   { id: "safety", label: "Safety", icon: ShieldCheck },
   { id: "docs", label: "Docs", icon: Files },
@@ -38,6 +39,8 @@ export function DeskApp({ children }: { children?: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
   const [notice, setNotice] = useState("");
   const [recordTitle, setRecordTitle] = useState("");
+  const [reviewBadge, setReviewBadge] = useState(0);
+  const [badgeTick, setBadgeTick] = useState(0);
   const online = useOnline();
   const navigate = useNavigate();
   // Two paths matter (spec 05 · F1):
@@ -54,6 +57,19 @@ export function DeskApp({ children }: { children?: ReactNode }) {
   const renderedView = viewForPath(rendered);
   const role = data && !data.needsSetup ? data.profile.role : "";
   const allowed = Boolean(role && view && canOpen(role, view));
+  // Spec 06 header badge: how many jobs still need a sharing review. Refreshed on every navigation
+  // (including /settings?project=…) and whenever Settings saves something.
+  const href = useRouterState({ select: (state) => state.location.href });
+  useEffect(() => {
+    if (!role || !can(role, "settings.sharing.view")) return;
+    let cancelled = false;
+    getSharingReviewCount()
+      .then((n) => !cancelled && setReviewBadge(n))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [role, href, badgeTick]);
 
   useEffect(() => {
     // Never during a pending transition: only a settled "/" (or a page this role can't open)
@@ -130,6 +146,7 @@ export function DeskApp({ children }: { children?: ReactNode }) {
     .map((id) => NAV.find((item) => item.id === id))
     .filter((item): item is (typeof NAV)[number] => Boolean(item));
   const canTeam = can(ready.profile.role, "crew.invite");
+  const canSettings = can(ready.profile.role, "settings.sharing.view");
   const current: View | null = allowed ? view : null;
   const label = current ? VIEW_LABEL[current] : "";
   const go = (to: View) => void navigate({ to: VIEW_PATH[to] });
@@ -146,7 +163,7 @@ export function DeskApp({ children }: { children?: ReactNode }) {
   }
 
   return (
-    <div className="min-h-dvh md:grid md:grid-cols-[13rem_1fr]">
+    <div className="min-h-dvh min-w-0 md:grid md:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
       <aside className="hidden border-r border-line bg-surface md:flex md:flex-col md:px-3 md:py-5">
         <div className="flex items-center gap-2 px-2">
           <Mark />
@@ -162,20 +179,37 @@ export function DeskApp({ children }: { children?: ReactNode }) {
         </nav>
       </aside>
       <div className="flex min-w-0 flex-col pb-20 md:pb-0">
-        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-          <div className="shrink-0">
-            <p className="font-display text-2xl">{label}</p>
+        <header className="flex min-w-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-2xl">{label}</p>
             <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
           </div>
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             {canTeam ? (
               <button
                 type="button"
                 onClick={() => go("team")}
+                aria-label="Team"
                 aria-current={current === "team" ? "page" : undefined}
                 className={`inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "team" ? "text-copper" : "text-muted"}`}
               >
-                <Users className="size-4" aria-hidden="true" /> Team
+                <Users className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Team</span>
+              </button>
+            ) : null}
+            {canSettings ? (
+              <button
+                type="button"
+                onClick={() => go("settings")}
+                aria-label={reviewBadge ? `Settings, ${reviewBadge} sharing review${reviewBadge === 1 ? "" : "s"} needed` : "Settings"}
+                aria-current={current === "settings" ? "page" : undefined}
+                className={`relative inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "settings" ? "text-copper" : "text-muted"}`}
+              >
+                <Settings className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Settings</span>
+                {reviewBadge ? (
+                  <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-copper px-1 text-xs font-semibold text-ink" data-testid="settings-badge">
+                    {reviewBadge}
+                  </span>
+                ) : null}
               </button>
             ) : null}
             <UserButton roleLabel={roleLabel(ready.profile.role)} />
@@ -194,7 +228,7 @@ export function DeskApp({ children }: { children?: ReactNode }) {
         ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
           {renderedView === current ? (
-            <DeskContext.Provider value={{ ready, commit, setRecordTitle }}>{children}</DeskContext.Provider>
+            <DeskContext.Provider value={{ ready, commit, setRecordTitle, sharingChanged: () => setBadgeTick((n) => n + 1) }}>{children}</DeskContext.Provider>
           ) : (
             <Skeleton lines={4} label={`Opening ${label}`} />
           )}

@@ -9,6 +9,8 @@ export type DeskContextValue = {
   commit: (work: Promise<DeskResult>) => Promise<void>;
   /** The record shown in the current view, for the page title ("RFI 004"). */
   setRecordTitle: (title: string) => void;
+  /** Sharing settings saved something: refresh the header review badge (spec 06). */
+  sharingChanged: () => void;
 };
 export const DeskContext = createContext<DeskContextValue | null>(null);
 
