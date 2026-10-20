@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { lunchStepScroll } from "@/lib/lunch-step";
 import { addMyPhoto, getMyReport, saveMyReport, submitMyReport } from "@/lib/server/fns";
-import { LunchDial } from "@/components/lunch-dial";
+import { HoursStep, type SubmitHours } from "@/components/hours-step";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import { PhotoThumb } from "@/components/photo-thumb";
 import { currentJobId, rememberJob } from "@/lib/use-current-job";
@@ -48,8 +48,10 @@ function scaled(img: HTMLImageElement, max: number, quality: number) {
 
 type Pending = { key: string; preview: string; state: "uploading" | "failed"; file: File };
 
-export function TodayReport() {
-  const day = localDay();
+/** Today's report, or (spec 02) an older day reopened because its hours were sent back. */
+export function TodayReport({ day: dayProp, onBackToToday }: { day?: string; onBackToToday?: () => void } = {}) {
+  const today = localDay();
+  const day = dayProp || today;
   const [report, setReport] = useState<Report | null>(null);
   const [jobs, setJobs] = useState<Loaded["jobs"]>([]);
   const [narrative, setNarrative] = useState("");
@@ -68,7 +70,6 @@ export function TodayReport() {
     section.scrollIntoView(lunchStepScroll(reduced));
     section.querySelector<HTMLElement>('[role="slider"]')?.focus({ preventScroll: true });
   }, [askLunch]);
-  const [lunch, setLunch] = useState(30);
 
   function apply(next: Loaded) {
     setReport(next.report);
@@ -152,6 +153,16 @@ export function TodayReport() {
     <div className="mx-auto grid max-w-xl gap-4" data-testid="today-report">
       <YoureOnCard />
       <section className="rounded-md border border-line bg-surface p-4">
+        {day !== today ? (
+          <p className="mb-2 rounded-md bg-raised p-3 text-base text-fg" role="status" data-testid="reopened-day">
+            Fixing {longDay(day)}. Your hours were sent back.{" "}
+            {onBackToToday ? (
+              <button type="button" className="min-h-11 text-copper underline" onClick={onBackToToday}>
+                Back to today
+              </button>
+            ) : null}
+          </p>
+        ) : null}
         <p className="text-sm font-medium uppercase tracking-widest text-copper">Daily report</p>
         <h2 className="mt-1 text-2xl">{longDay(day)}</h2>
         <dl className="mt-3 grid grid-cols-3 gap-2 text-base">
@@ -282,33 +293,24 @@ export function TodayReport() {
       {!submitted ? (
         <section ref={lunchStep} className="scroll-mb-24 rounded-md border border-line bg-surface p-4" data-testid="submit-step">
           {askLunch ? (
-            <div className="grid gap-4">
-              <h3 className="text-xl">How long was lunch?</h3>
-              <LunchDial value={lunch} onChange={setLunch} />
-              <button
-                type="button"
-                className="h-14 w-full rounded-md bg-copper text-lg font-medium text-ink disabled:opacity-60"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true);
-                  setError("");
-                  try {
-                    if (dirty) await saveMyReport({ data: { day, narrative, projectId } });
-                    apply(await submitMyReport({ data: { day, lunchMinutes: lunch } }));
-                    setAskLunch(false);
-                  } catch (cause) {
-                    setError(cause instanceof Error ? cause.message : "Could not submit.");
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              >
-                Submit with {lunch} min lunch
-              </button>
-              <button type="button" className="h-12 text-base text-muted underline" onClick={() => setAskLunch(false)}>
-                Not yet
-              </button>
-            </div>
+            <HoursStep
+              day={day}
+              busy={busy}
+              onCancel={() => setAskLunch(false)}
+              onSubmit={async (hours: SubmitHours) => {
+                setBusy(true);
+                setError("");
+                try {
+                  if (dirty) await saveMyReport({ data: { day, narrative, projectId } });
+                  apply(await submitMyReport({ data: { day, ...hours } }));
+                  setAskLunch(false);
+                } catch (cause) {
+                  setError(cause instanceof Error ? cause.message : "Could not submit.");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
           ) : (
             <button
               type="button"

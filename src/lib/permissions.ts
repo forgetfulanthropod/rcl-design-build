@@ -44,6 +44,14 @@ export const ACTIONS = [
   "settings.sharing.view",
   "settings.sharing.edit",
   "project.sharingReview", // "Mark reviewed" on one job (spec 06)
+  "time.own", // view my hours; edit them until approved (spec 02)
+  "time.review", // see others' hours: all jobs, or a Lead's jobs in job_leads
+  "time.approve", // approve / reject / edit others' hours (Lead: own jobs, never their own hours)
+  "time.unlock", // reopen an approved entry
+  "time.export", // payroll and sub-hours CSV export
+  "time.export.void", // void a payroll export (owner)
+  "rate.view", // pay rates and labor $ (= money)
+  "rate.edit",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -51,13 +59,13 @@ const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
 // Field roles read documents; creating them (RFIs included) is the lead's job (spec 05 · F2c).
 // doc.send is not in LABOR: Labor sends only where "Labor can send documents" is on (spec 06).
-const FIELD = new Set<Action>(["log.create", "workorder.updateOwn", "report.write", "doc.view", "crew.myWeek"]);
+const FIELD = new Set<Action>(["log.create", "workorder.updateOwn", "report.write", "doc.view", "crew.myWeek", "time.own"]);
 const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
   superadmin: ALL,
   owner: without("code.approve"),
-  admin: without("code.approve", "crew.inviteAdmin"),
+  admin: without("code.approve", "crew.inviteAdmin", "time.export.void"),
   lead: new Set<Action>([
     "project.phase",
     "milestone.create",
@@ -86,6 +94,9 @@ const MATRIX: Record<Role, Set<Action>> = {
     "doc.create",
     "doc.send",
     "doc.status",
+    "time.own",
+    "time.review",
+    "time.approve",
   ]),
   labor: LABOR,
   sub: FIELD,
@@ -135,21 +146,33 @@ export function invitableRoles(role: string): Role[] {
   return base;
 }
 
-export type NavId = "today" | "mine" | "reports" | "attention" | "crew" | "activities" | "safety" | "docs";
+export type NavId = "today" | "mine" | "reports" | "attention" | "crew" | "time" | "activities" | "safety" | "docs";
 
 /**
  * The app is slimmed to daily reports. Principals (report.review) review; everyone else writes.
- * Owner/Admin/Lead also get Crew (spec 01). The older desk views stay hidden from nav.
+ * Owner/Admin/Lead also get Crew (spec 01) and Time (spec 02). The older desk views stay hidden from nav.
  */
 export function navFor(role: string): NavId[] {
   const items: NavId[] = [];
   if (can(role, "report.review")) items.push("reports", "attention");
   else if (can(role, "report.write")) items.push("today", "mine");
   if (can(role, "crew.board.view")) items.push("crew");
+  if (can(role, "time.review")) items.push("time");
   if (can(role, "activity.add") || can(role, "activity.approve")) items.push("activities");
   if (can(role, "doc.view")) items.push("docs");
   if (can(role, "safety.write") || can(role, "safety.manage")) items.push("safety");
   return items;
+}
+
+/**
+ * [DECIDE] (no spec default) Desk-first views that sit in the phone header as an icon button
+ * instead of the bottom tab bar, so the bar keeps its six tabs (Activities, Safety, Docs stay put).
+ */
+export const PHONE_HEADER_NAV: NavId[] = ["time"];
+
+/** The phone bottom tab bar: navFor minus the header-on-phone views. */
+export function phoneTabsFor(role: string): NavId[] {
+  return navFor(role).filter((id) => !PHONE_HEADER_NAV.includes(id));
 }
 
 type Moneyed = {

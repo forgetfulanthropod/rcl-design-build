@@ -110,6 +110,14 @@ async function seedDemo(sql: Sql) {
   await seedSafety(sql, ids, jobIds);
   await seedDocuments(sql, ids, jobIds);
   await seedCrew(sql, ids, jobIds);
+  await seedTime(sql, ids);
+}
+
+async function seedTime(sql: Sql, ids: Record<DebugRole, string>) {
+  const reg = await sql<{ t: string | null }>`select to_regclass('time_entries')::text as t`;
+  if (!reg[0]?.t) return;
+  const { seedDemoTime } = await import("@/lib/server/time.server");
+  await seedDemoTime(sql, DEMO_COMPANY_ID, ids);
 }
 
 // A week of realistic daily reports. [daysAgo, persona, job index or -1, narrative, photo indexes, lunch]

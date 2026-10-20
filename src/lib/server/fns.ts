@@ -373,7 +373,15 @@ export const addMyPhoto = createServerFn({ method: "POST" })
 
 export const submitMyReport = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { day: string; lunchMinutes: number }) => ({ day: dayArg(input?.day), lunchMinutes: Number(input?.lunchMinutes) }))
+  .validator(
+    (input: { day: string; lunchMinutes: number; start: string; end: string; lines?: { projectId: string | null; costCodeId: string | null; minutes: number }[] }) => ({
+      day: dayArg(input?.day),
+      lunchMinutes: Number(input?.lunchMinutes),
+      start: optional(input?.start, 5),
+      end: optional(input?.end, 5),
+      lines: timeLines(input?.lines),
+    }),
+  )
   .handler(async ({ data, context }) => {
     const { me, assertCan } = await reportsFor(context.userId);
     assertCan(me.role, "report.write");
@@ -942,4 +950,171 @@ export const getYoureOn = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { getYoureOn: run } = await import("./crew.server");
     return run(context.userId);
+  });
+
+// ---- Timesheets (spec 02). Permissions checked in time.server. ----
+
+function timeLines(value: unknown): { projectId: string | null; costCodeId: string | null; minutes: number }[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 6).map((line: { projectId?: unknown; costCodeId?: unknown; minutes?: unknown }) => ({
+    projectId: optional(line?.projectId, 80) || null,
+    costCodeId: optional(line?.costCodeId, 80) || null,
+    minutes: Number(line?.minutes),
+  }));
+}
+
+function idList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && v.length > 0 && v.length <= 80).slice(0, 500);
+}
+
+function exportKind(value: unknown): "payroll" | "sub_hours" {
+  return value === "sub_hours" ? "sub_hours" : "payroll";
+}
+
+export const getSubmitDefaults = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string }) => ({ day: dayArg(input?.day) }))
+  .handler(async ({ context, data }) => {
+    const { getSubmitDefaults: run } = await import("./time.server");
+    return run(context.userId, data);
+  });
+
+export const getMyHours = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { week?: string } = {}) => ({ week: optional(input?.week, 10) || undefined }))
+  .handler(async ({ context, data }) => {
+    const { getMyHours: run } = await import("./time.server");
+    return run(context.userId, data);
+  });
+
+export const getTimeWeek = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { week?: string; today?: string } = {}) => ({
+    week: optional(input?.week, 10) || undefined,
+    today: optional(input?.today, 10) || undefined,
+  }))
+  .handler(async ({ context, data }) => {
+    const { getTimeWeek: run } = await import("./time.server");
+    return run(context.userId, data);
+  });
+
+export const getTimeReport = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { reportId: string }) => ({ reportId: required(input?.reportId, 80, "Report") }))
+  .handler(async ({ context, data }) => {
+    const { reportForTimeReview } = await import("./reports.server");
+    return reportForTimeReview(context.userId, data.reportId);
+  });
+
+export const approveTime = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { ids: string[] }) => ({ ids: idList(input?.ids) }))
+  .handler(async ({ context, data }) => {
+    const { approveEntries } = await import("./time.server");
+    return approveEntries(context.userId, data);
+  });
+
+export const rejectTime = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { ids: string[]; reason: string }) => ({ ids: idList(input?.ids), reason: optional(input?.reason, 500) }))
+  .handler(async ({ context, data }) => {
+    const { rejectEntries } = await import("./time.server");
+    return rejectEntries(context.userId, data);
+  });
+
+export const editTime = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; projectId: string | null; costCodeId: string | null; minutes: number }) => ({
+    id: required(input?.id, 80, "Entry"),
+    projectId: optional(input?.projectId, 80) || null,
+    costCodeId: optional(input?.costCodeId, 80) || null,
+    minutes: Number(input?.minutes),
+  }))
+  .handler(async ({ context, data }) => {
+    const { editEntry } = await import("./time.server");
+    return editEntry(context.userId, data);
+  });
+
+export const unlockTime = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { ids: string[] }) => ({ ids: idList(input?.ids) }))
+  .handler(async ({ context, data }) => {
+    const { unlockEntries } = await import("./time.server");
+    return unlockEntries(context.userId, data);
+  });
+
+export const nudgeTime = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; day: string }) => ({ userId: required(input?.userId, 80, "Person"), day: dayArg(input?.day) }))
+  .handler(async ({ context, data }) => {
+    const { nudgeMissing } = await import("./time.server");
+    return nudgeMissing(context.userId, data);
+  });
+
+export const previewPayroll = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { start?: string; end?: string; kind?: string } = {}) => ({
+    start: optional(input?.start, 10) || undefined,
+    end: optional(input?.end, 10) || undefined,
+    kind: exportKind(input?.kind),
+  }))
+  .handler(async ({ context, data }) => {
+    const { previewPayrollExport } = await import("./time.server");
+    return previewPayrollExport(context.userId, data);
+  });
+
+export const runPayroll = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { start: string; end: string; kind?: string }) => ({
+    start: optional(input?.start, 10),
+    end: optional(input?.end, 10),
+    kind: exportKind(input?.kind),
+  }))
+  .handler(async ({ context, data }) => {
+    const { runPayrollExport } = await import("./time.server");
+    return runPayrollExport(context.userId, data);
+  });
+
+export const listPayrollExports = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { listPayrollExports: run } = await import("./time.server");
+    return run(context.userId);
+  });
+
+export const getPayrollCsv = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Export") }))
+  .handler(async ({ context, data }) => {
+    const { getPayrollExportCsv } = await import("./time.server");
+    return getPayrollExportCsv(context.userId, data);
+  });
+
+export const voidPayroll = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Export") }))
+  .handler(async ({ context, data }) => {
+    const { voidPayrollExport } = await import("./time.server");
+    return voidPayrollExport(context.userId, data);
+  });
+
+export const listPayRates = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { listPayRates: run } = await import("./time.server");
+    return run(context.userId);
+  });
+
+export const setPayRate = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; effectiveOn: string; rateCents: number; burdenPct: number }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    effectiveOn: dayArg(input?.effectiveOn),
+    rateCents: Math.round(Number(input?.rateCents)),
+    burdenPct: Number(input?.burdenPct),
+  }))
+  .handler(async ({ context, data }) => {
+    const { setPayRate: run } = await import("./time.server");
+    return run(context.userId, data);
   });

@@ -3,6 +3,7 @@ import { needsFreshAttention } from "@/lib/attention";
 import { getAttention, listMyReports, listSharingReviewQueue, reviewReports } from "@/lib/server/fns";
 import { EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { ReportCard } from "@/components/report-card";
+import { MyHours } from "@/components/time-parts";
 import { localDay } from "@/components/today-report";
 import type { DailyReport } from "@/lib/server/reports.server";
 
@@ -12,7 +13,7 @@ function shift(day: string, days: number): string {
   return localDay(d);
 }
 
-export function MyReports() {
+export function MyReports({ onFixDay }: { onFixDay?: (day: string) => void } = {}) {
   const [reports, setReports] = useState<DailyReport[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -20,12 +21,13 @@ export function MyReports() {
       .then(setReports)
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load your reports."));
   }, []);
-  if (error) return <ErrorBanner message={error} />;
-  if (!reports) return <Skeleton lines={4} label="Loading your reports" />;
-  if (reports.length === 0) return <EmptyState title="No reports yet" body="Your daily reports show up here once you start one." />;
   return (
     <div className="mx-auto grid max-w-2xl gap-3">
-      {reports.map((r) => (
+      <MyHours onFixDay={onFixDay} />
+      {error ? <ErrorBanner message={error} /> : null}
+      {!error && !reports ? <Skeleton lines={4} label="Loading your reports" /> : null}
+      {reports && reports.length === 0 ? <EmptyState title="No reports yet" body="Your daily reports show up here once you start one." /> : null}
+      {(reports ?? []).map((r) => (
         <ReportCard key={r.id} report={r} showPerson={false} />
       ))}
     </div>

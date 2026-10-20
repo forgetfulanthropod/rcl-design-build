@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CalendarRange, ClipboardList, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
+import { AlertTriangle, CalendarRange, ClipboardList, Clock, Files, History, ListChecks, NotebookPen, Settings, ShieldCheck, Users } from "lucide-react";
 import { UserButton } from "@/lib/auth/gates";
 import { completeSetup, getSharingReviewCount, loadDesk } from "@/lib/server/fns";
 import { Mark } from "@/components/mark";
 import { Button, ErrorBanner, OfflineBadge, Skeleton } from "@/components/ui";
-import { navFor } from "@/lib/permissions";
+import { PHONE_HEADER_NAV, navFor, phoneTabsFor } from "@/lib/permissions";
 import { useOnline } from "@/lib/use-online";
 import { CrewView as TeamInviteView } from "@/components/desk-views";
 import { CrewView } from "@/components/crew-view";
@@ -14,6 +14,7 @@ import { ActivitiesView, ActivityOverview } from "@/components/activities-view";
 import { SafetyView } from "@/components/safety-view";
 import { DocumentsView } from "@/components/documents-view";
 import { SharingSettings } from "@/components/sharing-settings";
+import { TimeView } from "@/components/time-view";
 import { can, type NavId } from "@/lib/permissions";
 import { SUPER_ADMIN_PHONE_DISPLAY, roleLabel, samePhone } from "@/lib/roles";
 
@@ -29,6 +30,7 @@ const NAV: { id: NavId; label: string; icon: typeof Users }[] = [
   { id: "reports", label: "Reports", icon: ClipboardList },
   { id: "attention", label: "Attention", icon: AlertTriangle },
   { id: "crew", label: "Crew", icon: CalendarRange },
+  { id: "time", label: "Time", icon: Clock },
   { id: "activities", label: "Activities", icon: ListChecks },
   { id: "safety", label: "Safety", icon: ShieldCheck },
   { id: "docs", label: "Docs", icon: Files },
@@ -40,6 +42,8 @@ export function DeskApp() {
   const [view, setView] = useState<View | "">("");
   const [focus, setFocus] = useState({ id: "", day: "" });
   const [sharingProject, setSharingProject] = useState("");
+  // A day reopened because its hours were sent back (spec 02); "" = today.
+  const [reportDay, setReportDay] = useState("");
   const [reviewBadge, setReviewBadge] = useState(0);
   const [badgeTick, setBadgeTick] = useState(0);
   const [attempt, setAttempt] = useState(0);
@@ -110,6 +114,10 @@ export function DeskApp() {
   const nav = navFor(ready.profile.role)
     .map((id) => NAV.find((item) => item.id === id))
     .filter((item): item is (typeof NAV)[number] => Boolean(item));
+  const phoneTabs = phoneTabsFor(ready.profile.role)
+    .map((id) => NAV.find((item) => item.id === id))
+    .filter((item): item is (typeof NAV)[number] => Boolean(item));
+  const headerOnPhone = nav.filter((item) => PHONE_HEADER_NAV.includes(item.id));
   const canTeam = can(ready.profile.role, "crew.invite");
   const canSettings = can(ready.profile.role, "settings.sharing.view");
   const current: View =
@@ -149,6 +157,18 @@ export function DeskApp() {
             <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+            {headerOnPhone.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setView(item.id)}
+                aria-label={item.label}
+                aria-current={current === item.id ? "page" : undefined}
+                className={`inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm md:hidden ${current === item.id ? "text-copper" : "text-muted"}`}
+              >
+                <item.icon className="size-4" aria-hidden="true" />
+              </button>
+            ))}
             {canTeam ? (
               <button
                 type="button"
@@ -184,8 +204,16 @@ export function DeskApp() {
           </div>
         ) : null}
         <div className="min-w-0 flex-1 px-4 py-4">
-          {current === "today" ? <TodayReport /> : null}
-          {current === "mine" ? <MyReports /> : null}
+          {current === "today" ? <TodayReport key={reportDay} day={reportDay || undefined} onBackToToday={() => setReportDay("")} /> : null}
+          {current === "mine" ? (
+            <MyReports
+              onFixDay={(day) => {
+                setReportDay(day);
+                setView("today");
+              }}
+            />
+          ) : null}
+          {current === "time" ? <TimeView /> : null}
           {current === "reports" ? <ReportsReview key={`${focus.id}-${focus.day}`} focus={focus.id} initialDay={focus.day} /> : null}
           {current === "attention" ? (
             <AttentionView
@@ -213,9 +241,9 @@ export function DeskApp() {
       <nav
         aria-label="Main"
         className="pb-safe fixed inset-x-0 bottom-0 z-10 grid border-t border-line bg-surface md:hidden"
-        style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: `repeat(${phoneTabs.length}, minmax(0, 1fr))` }}
       >
-        {nav.map((item) => (
+        {phoneTabs.map((item) => (
           <button
             key={item.id}
             type="button"

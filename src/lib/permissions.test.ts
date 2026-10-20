@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ACTIONS, SHARING_GRANTS, assertCan, assertCanWith, can, canWith, invitableRoles, navFor, redactForRole } from "./permissions.ts";
+import { ACTIONS, PHONE_HEADER_NAV, SHARING_GRANTS, assertCan, assertCanWith, can, canWith, invitableRoles, navFor, phoneTabsFor, redactForRole } from "./permissions.ts";
 import { SHARING_DEFAULTS } from "./sharing.ts";
 import { normalizeRole, roleLabel, ROLES } from "./roles.ts";
 
@@ -47,13 +47,43 @@ test("unknown role can do nothing", () => {
   for (const a of ACTIONS) assert.equal(can("hacker", a), false);
 });
 
-test("nav stays compact; Owner/Admin/Lead get Crew (spec 01); Labor/Sub do not", () => {
-  for (const r of ROLES) assert.ok(navFor(r).length <= 6, r);
+test("phone tab bar stays compact; Owner/Admin/Lead get Crew (spec 01) and Time (spec 02); Labor/Sub do not", () => {
+  for (const r of ROLES) assert.ok(phoneTabsFor(r).length <= 6, r);
   assert.deepEqual(navFor("labor"), ["today", "mine", "activities", "docs", "safety"]);
   assert.deepEqual(navFor("sub"), ["today", "mine", "docs"]);
-  assert.deepEqual(navFor("lead"), ["today", "mine", "crew", "activities", "docs", "safety"]);
+  assert.deepEqual(navFor("lead"), ["today", "mine", "crew", "time", "activities", "docs", "safety"]);
+  assert.deepEqual(phoneTabsFor("lead"), ["today", "mine", "crew", "activities", "docs", "safety"]);
   for (const r of ["owner", "admin", "superadmin"]) {
-    assert.deepEqual(navFor(r), ["reports", "attention", "crew", "activities", "docs", "safety"], r);
+    assert.deepEqual(navFor(r), ["reports", "attention", "crew", "time", "activities", "docs", "safety"], r);
+    assert.deepEqual(phoneTabsFor(r), ["reports", "attention", "crew", "activities", "docs", "safety"], r);
+  }
+  assert.deepEqual(PHONE_HEADER_NAV, ["time"]);
+});
+
+test("timesheet actions (spec 02): everyone owns their hours; Lead reviews and approves; only Owner/Admin unlock, export and see rates", () => {
+  for (const r of ROLES) assert.equal(can(r, "time.own"), true, r);
+  for (const r of ["owner", "admin", "superadmin", "lead"]) {
+    assert.equal(can(r, "time.review"), true, r);
+    assert.equal(can(r, "time.approve"), true, r);
+  }
+  for (const r of ["labor", "sub"]) {
+    for (const a of ["time.review", "time.approve", "time.unlock", "time.export", "time.export.void", "rate.view", "rate.edit"] as const) {
+      assert.equal(can(r, a), false, `${r} ${a}`);
+    }
+  }
+  for (const a of ["time.unlock", "time.export", "rate.view", "rate.edit"] as const) {
+    assert.equal(can("owner", a), true, a);
+    assert.equal(can("admin", a), true, a);
+    assert.equal(can("lead", a), false, a);
+  }
+  // Voiding an export is the owner's call.
+  assert.equal(can("owner", "time.export.void"), true);
+  assert.equal(can("superadmin", "time.export.void"), true);
+  assert.equal(can("admin", "time.export.void"), false);
+  assert.equal(can("lead", "time.export.void"), false);
+  // No sharing setting grants pay rates.
+  for (const r of ["lead", "labor", "sub"]) {
+    assert.equal(canWith(r, "rate.view", { lead_budget_dollars: true, labor_doc_send: true }), false, r);
   }
 });
 

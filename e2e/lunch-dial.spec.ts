@@ -29,7 +29,7 @@ async function openLunchStep(page: Page) {
   await page.locator("#narrative").fill(LONG);
   await page.getByRole("button", { name: "Submit my day", exact: true }).click();
   const dial = page.getByRole("slider", { name: /lunch/i });
-  const submit = page.getByRole("button", { name: /^Submit with \d+ min lunch$/ });
+  const submit = page.getByRole("button", { name: /^Submit \d+h \d{2}m$/ });
   await expect(dial).toBeFocused();
   // Allow the smooth scroll to settle.
   await expect.poll(async () => (await submit.boundingBox())?.y ?? 1e6).toBeLessThan(page.viewportSize()!.height);

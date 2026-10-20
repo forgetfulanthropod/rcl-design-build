@@ -118,7 +118,12 @@ test("labor writes today's report: photo, narrative, first/last edit, lunch dial
   await page.screenshot({ path: `${OUT}/390x844-lunch-dial.png`, fullPage: true });
   await dial.screenshot({ path: `${OUT}/lunch-dial-closeup.png` });
 
-  await page.getByRole("button", { name: "Submit with 30 min lunch" }).click();
+  // Spec 02: the Hours card replaced "Submit with N min lunch"; set the day and submit the total.
+  const hours = page.getByTestId("hours-card");
+  await hours.getByLabel("Start", { exact: true }).fill("07:00");
+  await hours.getByLabel("End", { exact: true }).fill("15:30");
+  await expect(page.getByTestId("hours-total")).toHaveText("8h 00m");
+  await page.getByRole("button", { name: "Submit 8h 00m" }).click();
   await expect(page.getByText(/✓ Submitted at/)).toBeVisible();
   await expect(page.getByTestId("lunch-saved")).toHaveText("30 min");
   await expect(page.locator("#narrative")).toBeDisabled();

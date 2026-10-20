@@ -51,6 +51,18 @@ export function editableDay(day: string): string {
   return day;
 }
 
+/** Today's report, or an older day whose hours were rejected (spec 02: it reopens to be fixed). */
+async function openDay(userId: string, day: string): Promise<string> {
+  if (!isDay(day)) throw new Error("Pick a day.");
+  try {
+    return editableDay(day);
+  } catch (error) {
+    const { isReopenedDay } = await import("@/lib/server/time.server");
+    if (await isReopenedDay(userId, day)) return day;
+    throw error;
+  }
+}
+
 function decodeDataUrl(url: string, max: number): { mime: string; bytes: Buffer } {
   const m = /^data:([a-z/+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(url);
   if (!m || !MIMES.has(m[1])) throw new Error("Photos must be JPEG, PNG, or WebP.");
@@ -144,7 +156,7 @@ const SELECT = `
 // ---------- field: my own report ----------
 
 export async function getMyReport(userId: string, rawDay: string) {
-  const day = editableDay(rawDay);
+  const day = await openDay(userId, rawDay);
   const sql = await getSql();
   const me = await member(sql, userId);
   const rows = await sql.query<Row>(`${SELECT} where r.user_id = $1 and r.day = $2`, [userId, day]);
@@ -164,7 +176,7 @@ export async function getMyReport(userId: string, rawDay: string) {
 }
 
 export async function saveMyReport(userId: string, input: { day: string; narrative: string; projectId: string }) {
-  const day = editableDay(input.day);
+  const day = await openDay(userId, input.day);
   const sql = await getSql();
   const me = await member(sql, userId);
   let projectId: string | null = input.projectId || null;
@@ -184,7 +196,7 @@ export async function addMyPhoto(
   userId: string,
   input: { day: string; image: string; thumb: string; width: number; height: number; takenAt: string },
 ) {
-  const day = editableDay(input.day);
+  const day = await openDay(userId, input.day);
   const full = decodeDataUrl(input.image, MAX_PHOTO_BYTES);
   const thumb = decodeDataUrl(input.thumb, MAX_THUMB_BYTES);
   const sql = await getSql();
@@ -200,17 +212,30 @@ export async function addMyPhoto(
   return getMyReport(userId, day);
 }
 
-export async function submitMyReport(userId: string, input: { day: string; lunchMinutes: number }) {
-  const day = editableDay(input.day);
+/** Submits the day with its hours (spec 02): start, end, lunch and job/cost-code lines. */
+export async function submitMyReport(
+  userId: string,
+  input: { day: string; lunchMinutes: number; start: string; end: string; lines?: { projectId: string | null; costCodeId: string | null; minutes: number }[] },
+) {
+  const day = await openDay(userId, input.day);
   const lunch = Number(input.lunchMinutes);
   if (!Number.isInteger(lunch) || lunch < 0 || lunch > 60) throw new Error("Lunch must be 0 to 60 minutes.");
   const sql = await getSql();
   const me = await member(sql, userId);
-  const id = await touchReport(sql, me, day);
-  const rows = await sql<{ narrative: string }>`select narrative from daily_reports where id = ${id}`;
-  if (!text(rows[0]?.narrative).trim()) throw new Error("Write a few words about your day before submitting.");
-  await sql`update daily_reports set lunch_minutes = ${lunch}, submitted_at = now(), last_edit_at = now() where id = ${id}`;
+  await touchReport(sql, me, day);
+  const { submitDayTime } = await import("@/lib/server/time.server");
+  await submitDayTime(userId, { day, lunchMinutes: lunch, start: input.start, end: input.end, lines: input.lines });
   return getMyReport(userId, day);
+}
+
+/** One report for a time reviewer (Owner/Admin, or a Lead on that job): the Time drawer's report card. */
+export async function reportForTimeReview(userId: string, reportId: string): Promise<DailyReport | null> {
+  const { canReviewReport } = await import("@/lib/server/time.server");
+  if (!(await canReviewReport(userId, reportId))) return null;
+  const sql = await getSql();
+  const rows = await sql.query<Row>(`${SELECT} where r.id = $1`, [reportId]);
+  const [found] = await hydrate(sql, rows);
+  return found ?? null;
 }
 
 export async function listMyReports(userId: string) {
@@ -257,7 +282,11 @@ export async function readPhoto(userId: string, photoId: string) {
   `;
   const p = rows[0];
   if (!p) return null;
-  if (text(p.user_id) !== userId && !isPrincipal(me.role)) return null;
+  if (text(p.user_id) !== userId && !isPrincipal(me.role)) {
+    const owner = await sql<{ report_id: string }>`select report_id from daily_report_photos where id = ${photoId}`;
+    const { canReviewReport } = await import("@/lib/server/time.server");
+    if (!owner[0] || !(await canReviewReport(userId, text(owner[0].report_id)))) return null;
+  }
   return { mime: text(p.mime), bytes: Buffer.from(p.bytes) };
 }
 

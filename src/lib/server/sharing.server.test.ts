@@ -241,7 +241,10 @@ test("migration 0014 flags every existing job, archived included, and re-running
   await db`insert into companies (id, name) values ('c1', 'Old Co')`;
   await db`insert into projects (id, company_id, name, client_name, address, phase) values ('p1', 'c1', 'Active', 'C', 'A', 'Build')`;
   await db`insert into projects (id, company_id, name, client_name, address, phase, archived) values ('p2', 'c1', 'Archived', 'C', 'A', 'Done', true)`;
-  assert.deepEqual(await applyMigrations(old), ["0014_sharing_settings.sql", "0015_crew.sql"]);
+  // 0014 then 0015 apply, then any later migrations (0016 timesheets, …).
+  const applied = await applyMigrations(old);
+  assert.deepEqual(applied.slice(0, 2), ["0014_sharing_settings.sql", "0015_crew.sql"]);
+  assert.ok(applied.every((name) => name >= "0014"), applied.join(", "));
   const rows = await db<{ project_id: string; s: string; by: string }>`
     select project_id, sharing_review_status as s, review_requested_by as by from project_settings order by project_id
   `;
