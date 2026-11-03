@@ -102,12 +102,28 @@ function TrackingPage() {
 
   const entries = (log[day] ?? []).slice().sort((a, b) => a.ts.localeCompare(b.ts));
 
-  function addText() {
-    if (!text.trim()) return;
-    const entry: Entry = { id: crypto.randomUUID(), ts: new Date().toISOString(), kind: "text", body: text.trim() };
+  function addEntry(kind: "text" | "photo", body?: string, dataUrl?: string) {
+    const entry: Entry = {
+      id: crypto.randomUUID(),
+      ts: new Date().toISOString(),
+      kind,
+      body,
+      dataUrl,
+    };
     const next = { ...log, [day]: [...(log[day] ?? []), entry] };
     setLog(next);
     saveLog(next);
+  }
+
+  function addText() {
+    if (!text.trim()) return;
+    addEntry("text", text.trim());
+    setText("");
+  }
+
+  function logNow() {
+    const body = text.trim() || "Activity logged";
+    addEntry("text", body);
     setText("");
   }
 
@@ -115,10 +131,7 @@ function TrackingPage() {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      const entry: Entry = { id: crypto.randomUUID(), ts: new Date().toISOString(), kind: "photo", dataUrl };
-      const next = { ...log, [day]: [...(log[day] ?? []), entry] };
-      setLog(next);
-      saveLog(next);
+      addEntry("photo", undefined, dataUrl);
     };
     reader.readAsDataURL(file);
   }
@@ -148,7 +161,20 @@ function TrackingPage() {
   return (
     <main className="mx-auto max-w-lg px-4 py-8">
       <h1 className="mb-2 text-2xl font-semibold">Tracking</h1>
-      <p className="mb-4 text-sm text-muted">Simple timestamped activity log. Stored only in this browser.</p>
+      <p className="mb-6 text-sm text-muted">Simple timestamped activity log. Stored only in this browser.</p>
+
+      {/* Big green clock Log button */}
+      <div className="mb-8 flex justify-center">
+        <button
+          type="button"
+          onClick={logNow}
+          className="flex h-32 w-32 flex-col items-center justify-center rounded-full bg-green-600 text-white shadow-lg transition hover:bg-green-700 active:scale-95"
+          aria-label="Log activity now"
+        >
+          <span className="text-4xl">🕒</span>
+          <span className="mt-1 text-xl font-bold tracking-wide">Log</span>
+        </button>
+      </div>
 
       <label className="mb-4 block text-sm">
         Day
@@ -181,7 +207,7 @@ function TrackingPage() {
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Note…"
+          placeholder="Optional note (included when you press Log)…"
           rows={3}
           className="w-full rounded border border-line bg-raised px-3 py-2"
         />
