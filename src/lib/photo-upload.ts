@@ -55,10 +55,15 @@ export function firstThatFits<T extends { url: string }>(encode: (quality: numbe
 export type ExifTime = { local: string; offset: string | null };
 
 /**
- * DateTimeOriginal (or DateTimeDigitized) from a JPEG's EXIF block, with OffsetTimeOriginal
- * when the camera wrote one. `local` is "YYYY-MM-DDTHH:MM:SS" (camera wall-clock time).
+ * DateTimeOriginal (or DateTimeDigitized) from a JPEG EXIF block or a HEIC/HEIF `Exif` item,
+ * with OffsetTimeOriginal when the camera wrote one. `local` is "YYYY-MM-DDTHH:MM:SS".
+ * HEIC has to be read here: heic2any drops the tags when it converts to JPEG.
  */
 export function exifTakenAt(bytes: Uint8Array): ExifTime | null {
+  return jpegExif(bytes) ?? (isHeifBytes(bytes) ? heifExif(bytes) : null);
+}
+
+function jpegExif(bytes: Uint8Array): ExifTime | null {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
   let i = 2;
   while (i + 4 <= bytes.length) {
@@ -71,6 +76,151 @@ export function exifTakenAt(bytes: Uint8Array): ExifTime | null {
       return readTiff(bytes.subarray(i + 10, Math.min(bytes.length, i + 2 + len)));
     }
     i += 2 + len;
+  }
+  return null;
+}
+
+function isHeifBytes(bytes: Uint8Array): boolean {
+  if (bytes.length < 12) return false;
+  if (String.fromCharCode(...bytes.subarray(4, 8)) !== "ftyp") return false;
+  return HEIF_BRANDS.has(String.fromCharCode(...bytes.subarray(8, 12)));
+}
+
+function be(bytes: Uint8Array, offset: number, size: number): number {
+  if (size < 1 || offset < 0 || offset + size > bytes.length) return -1;
+  let value = 0;
+  for (let i = 0; i < size; i += 1) value = value * 256 + bytes[offset + i];
+  return value;
+}
+
+type Box = { type: string; payload: number; end: number };
+
+function boxes(bytes: Uint8Array, start: number, end: number): Box[] {
+  const out: Box[] = [];
+  let i = start;
+  while (i + 8 <= end) {
+    let size = be(bytes, i, 4);
+    let header = 8;
+    if (size === 1) {
+      const hi = be(bytes, i + 8, 4);
+      const lo = be(bytes, i + 12, 4);
+      if (hi < 0 || lo < 0) break;
+      size = hi * 0x100000000 + lo;
+      header = 16;
+    } else if (size === 0) size = end - i;
+    if (size < header || i + size > end) break;
+    out.push({ type: String.fromCharCode(bytes[i + 4], bytes[i + 5], bytes[i + 6], bytes[i + 7]), payload: i + header, end: i + size });
+    i += size;
+  }
+  return out;
+}
+
+/** item id → 4cc, from an `iinf` box (infe v2/v3). */
+function itemTypes(bytes: Uint8Array, iinf: Box): Map<number, string> {
+  const version = bytes[iinf.payload] ?? 0;
+  let at = iinf.payload + 4;
+  const count = version === 0 ? be(bytes, at, 2) : be(bytes, at, 4);
+  at += version === 0 ? 2 : 4;
+  const map = new Map<number, string>();
+  if (count < 0 || count > 64) return map;
+  for (const child of boxes(bytes, at, iinf.end)) {
+    if (child.type !== "infe") continue;
+    const v = bytes[child.payload] ?? 0;
+    if (v < 2) continue;
+    let q = child.payload + 4;
+    const id = v === 2 ? be(bytes, q, 2) : be(bytes, q, 4);
+    q += v === 2 ? 2 : 4;
+    q += 2;
+    if (id < 0 || q + 4 > child.end) continue;
+    map.set(id, String.fromCharCode(bytes[q], bytes[q + 1], bytes[q + 2], bytes[q + 3]));
+  }
+  return map;
+}
+
+/** item id → absolute file ranges, from an `iloc` box (version 0, 1, or 2). */
+function itemExtents(bytes: Uint8Array, iloc: Box): Map<number, { off: number; len: number }[]> {
+  const version = bytes[iloc.payload] ?? 0;
+  let p = iloc.payload + 4;
+  if (p + 2 > iloc.end) return new Map();
+  const offsetSize = bytes[p] >> 4;
+  const lengthSize = bytes[p] & 0x0f;
+  const baseSize = bytes[p + 1] >> 4;
+  const indexSize = version === 1 || version === 2 ? bytes[p + 1] & 0x0f : 0;
+  p += 2;
+  const count = version < 2 ? be(bytes, p, 2) : be(bytes, p, 4);
+  p += version < 2 ? 2 : 4;
+  const map = new Map<number, { off: number; len: number }[]>();
+  if (count < 0 || count > 64 || offsetSize > 4 || lengthSize > 4 || baseSize > 4) return map;
+  for (let i = 0; i < count && p < iloc.end; i += 1) {
+    const id = version < 2 ? be(bytes, p, 2) : be(bytes, p, 4);
+    p += version < 2 ? 2 : 4;
+    if (version === 1 || version === 2) p += 2;
+    p += 2;
+    const base = baseSize ? be(bytes, p, baseSize) : 0;
+    p += baseSize;
+    const extents = be(bytes, p, 2);
+    p += 2;
+    const list: { off: number; len: number }[] = [];
+    const n = extents < 0 || extents > 8 ? 0 : extents;
+    for (let j = 0; j < n; j += 1) {
+      p += indexSize;
+      const off = offsetSize ? be(bytes, p, offsetSize) : 0;
+      p += offsetSize;
+      const len = lengthSize ? be(bytes, p, lengthSize) : 0;
+      p += lengthSize;
+      if (base >= 0 && off >= 0 && len > 0) list.push({ off: base + off, len });
+    }
+    if (id >= 0 && list.length) map.set(id, list);
+  }
+  return map;
+}
+
+function tiffFromExifPayload(payload: Uint8Array): ExifTime | null {
+  if (payload.length < 8) return null;
+  const shift = be(payload, 0, 4);
+  const starts = shift >= 0 ? [4 + shift, shift, 0] : [0];
+  for (const at of starts) {
+    if (at < payload.length && (payload[at] === 0x49 || payload[at] === 0x4d)) {
+      const hit = readTiff(payload.subarray(at));
+      if (hit) return hit;
+    }
+  }
+  for (let i = 0; i + 14 < payload.length && i < 64; i += 1) {
+    if (payload[i] === 0x45 && payload[i + 1] === 0x78 && payload[i + 2] === 0x69 && payload[i + 3] === 0x66 && payload[i + 4] === 0 && payload[i + 5] === 0) {
+      const hit = readTiff(payload.subarray(i + 6));
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+function heifExif(bytes: Uint8Array): ExifTime | null {
+  let meta: Box | undefined;
+  for (const box of boxes(bytes, 0, bytes.length)) {
+    if (box.type === "meta") meta = box;
+  }
+  if (!meta || meta.payload + 4 >= meta.end) return null;
+  const children = boxes(bytes, meta.payload + 4, meta.end);
+  const iinf = children.find((b) => b.type === "iinf");
+  const iloc = children.find((b) => b.type === "iloc");
+  if (iinf && iloc) {
+    const types = itemTypes(bytes, iinf);
+    const extents = itemExtents(bytes, iloc);
+    for (const [id, type] of types) {
+      if (type !== "Exif") continue;
+      for (const range of extents.get(id) ?? []) {
+        if (range.off + range.len > bytes.length) continue;
+        const hit = tiffFromExifPayload(bytes.subarray(range.off, range.off + range.len));
+        if (hit) return hit;
+      }
+    }
+  }
+  // Declared somewhere the iloc walk didn't reach: the Exif marker plus a TIFF header.
+  const limit = Math.min(bytes.length, 8 * 1024 * 1024);
+  for (let i = 0; i + 14 < limit; i += 1) {
+    if (bytes[i] !== 0x45 || bytes[i + 1] !== 0x78 || bytes[i + 2] !== 0x69 || bytes[i + 3] !== 0x66 || bytes[i + 4] !== 0 || bytes[i + 5] !== 0) continue;
+    const hit = readTiff(bytes.subarray(i + 6, Math.min(bytes.length, i + 6 + 65536)));
+    if (hit) return hit;
   }
   return null;
 }
@@ -126,4 +276,41 @@ export function plausibleTakenAt(iso: string | null, now = Date.now()): string |
   const t = Date.parse(iso);
   if (Number.isNaN(t) || t < Date.parse("2000-01-01T00:00:00Z") || t > now + 86_400_000) return null;
   return new Date(t).toISOString();
+}
+
+export type PhotoTimeSource = "exif" | "file";
+
+/**
+ * The clock to show for a photo. The camera's DateTimeOriginal wins. A file's lastModified
+ * is only used when the camera wrote no capture time, and callers must label it as file time.
+ */
+export function resolvePhotoClock(
+  input: { exif: string | null; lastModified: number | null },
+  now = Date.now(),
+): { at: string; source: PhotoTimeSource } | null {
+  const exif = plausibleTakenAt(input.exif, now);
+  if (exif) return { at: exif, source: "exif" };
+  if (input.lastModified == null || !Number.isFinite(input.lastModified) || input.lastModified <= 0) return null;
+  const file = plausibleTakenAt(new Date(input.lastModified).toISOString(), now);
+  return file ? { at: file, source: "file" } : null;
+}
+
+/** Camera time stays in `takenAt`. A file-modified fallback is `fileTime` and is never called "taken". */
+export function splitPhotoClock(takenAt: string | null, source: string | null): { takenAt: string | null; fileTime: string | null } {
+  if (!takenAt) return { takenAt: null, fileTime: null };
+  if (source === "file") return { takenAt: null, fileTime: takenAt };
+  return { takenAt, fileTime: null };
+}
+
+/**
+ * What a photo upload stores. An unlabeled time is the camera (older clients).
+ * File time is stored only when the client marks it as such.
+ */
+export function storedPhotoClock(input: { takenAt: string; fileTime: string; takenSource: string }): { at: string | null; source: PhotoTimeSource | null } {
+  if (input.takenSource === "file") {
+    const file = plausibleTakenAt(input.fileTime || input.takenAt);
+    return file ? { at: file, source: "file" } : { at: null, source: null };
+  }
+  const exif = plausibleTakenAt(input.takenAt);
+  return exif ? { at: exif, source: "exif" } : { at: null, source: null };
 }

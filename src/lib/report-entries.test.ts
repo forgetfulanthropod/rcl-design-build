@@ -7,6 +7,7 @@ import {
   legacyPhotoId,
   legacyTextId,
   narrativeOf,
+  photoClockLabel,
   planTextSave,
   sortEntries,
   type ReportEntry,
@@ -85,4 +86,13 @@ test("entryStamp shows the time, plus 'edited' when it changed later", () => {
   assert.equal(entryStamp({ createdAt: "2026-10-20T08:14:00Z", editedAt: null }, clock), "08:14");
   assert.equal(entryStamp({ createdAt: "2026-10-20T08:14:00Z", editedAt: "2026-10-20T09:02:00Z" }, clock), "08:14 · edited 09:02");
   assert.equal(entryStamp({ createdAt: "2026-10-20T08:14:00Z", editedAt: "2026-10-20T08:14:30Z" }, clock), "08:14", "same minute: no noise");
+});
+
+test("photoClockLabel marks a file-time fallback and never calls it taken", () => {
+  const fmt = { clock: (v: string) => v.slice(11, 16), dayKey: (v: string) => v.slice(0, 10), shortDay: (v: string) => `D${v.slice(8, 10)}` };
+  assert.equal(photoClockLabel({ takenAt: "2026-10-20T06:45:00Z" }, "2026-10-20T09:00:00Z", fmt), "taken 06:45");
+  assert.equal(photoClockLabel({ fileTime: "2026-10-20T15:04:00Z" }, "2026-10-20T15:10:00Z", fmt), "file time 15:04 (not camera)");
+  assert.equal(photoClockLabel({ fileTime: "2026-10-18T15:04:00Z" }, "2026-10-20T15:10:00Z", fmt), "file time D18, 15:04 (not camera)");
+  assert.equal(photoClockLabel({ takenAt: "2026-10-20T06:45:00Z", fileTime: "2026-10-20T15:04:00Z" }, "2026-10-20T09:00:00Z", fmt), "taken 06:45");
+  assert.equal(photoClockLabel({}, "2026-10-20T09:00:00Z", fmt), "");
 });

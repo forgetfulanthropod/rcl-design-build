@@ -4,6 +4,8 @@
  * the PDF shows the same times as the screen. No money is ever part of the model.
  */
 import { PdfDoc } from "./pdf.ts";
+import { drawSessionCaption } from "./session-caption.ts";
+import type { WorkSession } from "./work-sessions.ts";
 
 export type ReportPdfEntry =
   | { kind: "text"; stamp: string; body: string }
@@ -19,6 +21,8 @@ export type ReportPdfModel = {
   status: string;
   generated: string;
   entries: ReportPdfEntry[];
+  /** Work sessions for the caption. Empty or omitted leaves the PDF unchanged. */
+  sessions?: Pick<WorkSession, "id" | "startMin" | "projectName" | "notes">[];
 };
 
 export function reportPdfFileName(author: string, isoDay: string): string {
@@ -52,6 +56,7 @@ export function buildReportPdf(model: ReportPdfModel): Uint8Array {
     if (entry.kind === "text") doc.paragraph(entry.body, 11.5, { leading: 16 });
     else if (!entry.jpeg || !doc.jpeg(entry.jpeg)) doc.paragraph("(This photo could not be included.)", 11, { gray: 0.35 });
   }
+  drawSessionCaption(doc, model.sessions ?? []);
   return doc.render({
     title: `Daily report · ${model.author} · ${model.day}`,
     footer: (page, total) => `${model.author} · ${model.day} · ${model.job} · Generated ${model.generated} · Page ${page} of ${total}`,

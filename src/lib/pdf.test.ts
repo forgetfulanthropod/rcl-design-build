@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { PdfDoc, extractPdfText, jpegInfo, pdfString, textWidth, toWinAnsi, wrapText } from "./pdf.ts";
 import { buildReportPdf, reportPdfFileName, type ReportPdfModel } from "./report-pdf.ts";
+import { sessionCaption } from "./work-sessions.ts";
 
 const PHOTO = new Uint8Array(readFileSync(new URL("../../e2e/fixtures/site-photo.jpg", import.meta.url)));
 const latin1 = (bytes: Uint8Array) => Buffer.from(bytes).toString("latin1");
@@ -140,4 +141,24 @@ test("PDF file name: day and a slug of the author", () => {
   assert.equal(reportPdfFileName("Sam Whitfield (Bluegrass Electric)", "2026-10-20"), "daily-report-2026-10-20-sam-whitfield-bluegrass-electric.pdf");
   assert.equal(reportPdfFileName("José Núñez", "2026-10-20"), "daily-report-2026-10-20-jose-nunez.pdf");
   assert.equal(reportPdfFileName("", "2026-10-20"), "daily-report-2026-10-20-report.pdf");
+});
+
+test("report PDF captions sessions a, b, c with the project name bold and the notes after it", () => {
+  const sessions = [
+    { id: "b", startMin: 13 * 60, projectName: "Project B", notes: "drywall takeoffs" },
+    { id: "a", startMin: 8 * 60, projectName: "Project A", notes: "demolish fence" },
+  ];
+  assert.equal(sessionCaption(sessions), "a  Project A demolish fence   b  Project B drywall takeoffs");
+  const bytes = buildReportPdf({ ...MODEL, sessions });
+  const raw = assertValidPdf(bytes);
+  const text = extractPdfText(bytes).join("");
+  assert.match(text, /a {2}Project A demolish fence {3}b {2}Project B drywall takeoffs/);
+  // The project name is the bold span (F2); the notes stay regular (F1).
+  assert.match(raw, /\/F2 11 Tf [^\n]*\(Project\) Tj/);
+  assert.match(raw, /\/F2 11 Tf [^\n]*\(A\) Tj/);
+  assert.match(raw, /\/F1 11 Tf [^\n]*\(demolish\) Tj/);
+  assert.match(raw, /\/F1 11 Tf [^\n]*\(fence\) Tj/);
+  assert.ok(!text.includes("$"));
+  // No sessions: the caption is absent and the existing report text is unchanged.
+  assert.equal(extractPdfText(buildReportPdf(MODEL)).includes("Sessions"), false);
 });

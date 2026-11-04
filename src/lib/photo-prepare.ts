@@ -10,11 +10,23 @@ import {
   exifTakenAt,
   firstThatFits,
   isHeic,
-  plausibleTakenAt,
+  resolvePhotoClock,
   tooLargeMessage,
+  type PhotoTimeSource,
 } from "@/lib/photo-upload";
 
-export type Prepared = { image: string; thumb: string; width: number; height: number; takenAt: string | null; converted: boolean };
+export type Prepared = {
+  image: string;
+  thumb: string;
+  width: number;
+  height: number;
+  /** Camera DateTimeOriginal, when the file has one. */
+  takenAt: string | null;
+  /** File lastModified, only when there is no camera time. Marked as such in the UI. */
+  fileTime: string | null;
+  takenSource: PhotoTimeSource | null;
+  converted: boolean;
+};
 
 async function decode(blob: Blob): Promise<HTMLImageElement> {
   const url = URL.createObjectURL(blob);
@@ -44,12 +56,14 @@ function encode(img: HTMLImageElement, max: number, quality: number) {
 export async function preparePhoto(file: File): Promise<Prepared> {
   const big = tooLargeMessage(file.size);
   if (big) throw new Error(big);
-  const head = new Uint8Array(await file.slice(0, 256 * 1024).arrayBuffer());
-  const takenAt = plausibleTakenAt(exifIso(exifTakenAt(head)));
+  // The whole file: a HEIC Exif item can sit past the first boxes, and heic2any strips it.
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const head = bytes.subarray(0, Math.min(bytes.length, 256 * 1024));
+  const clock = resolvePhotoClock({ exif: exifIso(exifTakenAt(bytes)), lastModified: file.lastModified });
   let img: HTMLImageElement;
   let converted = false;
   try {
-    img = await decode(file);
+    img = await decode(new Blob([bytes], { type: file.type }));
   } catch {
     if (!isHeic(file, head)) throw new Error("That file isn't a photo this phone can read.");
     try {
@@ -64,5 +78,14 @@ export async function preparePhoto(file: File): Promise<Prepared> {
   const full = firstThatFits((q) => encode(img, STORED_MAX_SIDE, q)) ?? firstThatFits((q) => encode(img, 1024, q));
   if (!full) throw new Error("That photo is too detailed to upload. Try a smaller one.");
   const thumb = encode(img, 320, 0.7);
-  return { image: full.url, thumb: thumb.url, width: full.w, height: full.h, takenAt, converted };
+  return {
+    image: full.url,
+    thumb: thumb.url,
+    width: full.w,
+    height: full.h,
+    takenAt: clock?.source === "exif" ? clock.at : null,
+    fileTime: clock?.source === "file" ? clock.at : null,
+    takenSource: clock?.source ?? null,
+    converted,
+  };
 }

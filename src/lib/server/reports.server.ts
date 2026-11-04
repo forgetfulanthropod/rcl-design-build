@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSql, type Sql } from "@/lib/db";
 import { can, ForbiddenError } from "@/lib/permissions";
-import { plausibleTakenAt } from "@/lib/photo-upload";
+import { splitPhotoClock, storedPhotoClock } from "@/lib/photo-upload";
 import { legacyEntries, type ReportEntry, type TextEdit } from "@/lib/report-entries";
 import { addPhotoEntry, backfillEntries, entriesFor, pdfFlags, saveTextEntries } from "./entries.server";
 
@@ -12,7 +12,7 @@ const MAX_THUMB_BYTES = 200 * 1024;
 const MAX_PHOTOS = 20;
 const MIMES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-export type ReportPhoto = { id: string; thumb: string; takenAt: string | null; createdAt: string };
+export type ReportPhoto = { id: string; thumb: string; takenAt: string | null; fileTime: string | null; createdAt: string };
 export type DailyReport = {
   id: string | null;
   day: string;
@@ -124,8 +124,8 @@ async function hydrate(sql: Sql, rows: Row[], viewer: Member): Promise<DailyRepo
     viewer,
     rows.map((r) => ({ id: text(r.id), userId: text(r.user_id), projectId: r.project_id ? text(r.project_id) : null })),
   );
-  const photos = await sql.query<{ id: string; report_id: string; thumb: Uint8Array; taken_at: unknown; created_at: unknown }>(
-    `select id, report_id, thumb, taken_at, created_at from daily_report_photos
+  const photos = await sql.query<{ id: string; report_id: string; thumb: Uint8Array; taken_at: unknown; taken_source: unknown; created_at: unknown }>(
+    `select id, report_id, thumb, taken_at, taken_source, created_at from daily_report_photos
      where report_id = any($1) order by created_at asc`,
     [ids],
   );
@@ -135,7 +135,7 @@ async function hydrate(sql: Sql, rows: Row[], viewer: Member): Promise<DailyRepo
       .map((p) => ({
         id: text(p.id),
         thumb: `data:image/jpeg;base64,${Buffer.from(p.thumb).toString("base64")}`,
-        takenAt: iso(p.taken_at),
+        ...splitPhotoClock(iso(p.taken_at), p.taken_source == null ? null : text(p.taken_source)),
         createdAt: iso(p.created_at) ?? "",
       }));
     const stored = entries.get(text(r.id)) ?? [];
@@ -222,7 +222,7 @@ export async function saveMyReport(userId: string, input: { day: string; texts: 
 
 export async function addMyPhoto(
   userId: string,
-  input: { day: string; image: string; thumb: string; width: number; height: number; takenAt: string },
+  input: { day: string; image: string; thumb: string; width: number; height: number; takenAt: string; fileTime: string; takenSource: string },
 ) {
   const day = editableDay(input.day);
   const full = decodeDataUrl(input.image, MAX_PHOTO_BYTES);
@@ -233,10 +233,11 @@ export async function addMyPhoto(
   const count = await sql<{ n: number }>`select count(*) as n from daily_report_photos where report_id = ${id}`;
   if (Number(count[0]?.n ?? 0) >= MAX_PHOTOS) throw new Error(`Up to ${MAX_PHOTOS} photos per day.`);
   const photoId = randomUUID();
+  const clock = storedPhotoClock({ takenAt: iso(input.takenAt) ?? "", fileTime: iso(input.fileTime) ?? "", takenSource: input.takenSource });
   await sql`
-    insert into daily_report_photos (id, report_id, company_id, user_id, mime, bytes, thumb, size_bytes, width, height, taken_at)
+    insert into daily_report_photos (id, report_id, company_id, user_id, mime, bytes, thumb, size_bytes, width, height, taken_at, taken_source)
     values (${photoId}, ${id}, ${me.companyId}, ${userId}, ${full.mime}, ${full.bytes}, ${thumb.bytes},
-            ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${plausibleTakenAt(iso(input.takenAt))})
+            ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${clock.at}, ${clock.source})
   `;
   await addPhotoEntry(sql, me, id, photoId);
   return getMyReport(userId, day);
@@ -332,11 +333,28 @@ export async function reportPdfData(userId: string, input: { reportId?: string; 
     lastEditAt: report.lastEditAt,
     lunchMinutes: report.lunchMinutes,
     submittedAt: report.submittedAt,
-    entries: report.entries.map((e) => ({
-      ...e,
-      takenAt: e.photoId ? (report.photos.find((p) => p.id === e.photoId)?.takenAt ?? null) : null,
-    })),
+    entries: report.entries.map((e) => {
+      const photo = e.photoId ? report.photos.find((p) => p.id === e.photoId) : undefined;
+      return { ...e, takenAt: photo?.takenAt ?? null, fileTime: photo?.fileTime ?? null };
+    }),
+    sessions: await sessionRows(sql, me.companyId, report.userId, report.day),
   };
+}
+
+async function sessionRows(sql: Sql, companyId: string, userId: string, day: string) {
+  const rows = await sql<{ id: string; project_name: string | null; start_min: number; notes: string }>`
+    select s.id, p.name as project_name, s.start_min, s.notes
+    from work_sessions s
+    left join projects p on p.id = s.project_id
+    where s.company_id = ${companyId} and s.user_id = ${userId} and s.day = ${day}
+    order by s.start_min asc, s.id asc
+  `;
+  return rows.map((row) => ({
+    id: text(row.id),
+    startMin: Number(row.start_min),
+    projectName: text(row.project_name).trim() || "Untitled",
+    notes: text(row.notes),
+  }));
 }
 
 // ---------- AI attention summary ----------

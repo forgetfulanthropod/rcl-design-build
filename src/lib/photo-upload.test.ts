@@ -11,6 +11,9 @@ import {
   firstThatFits,
   isHeic,
   plausibleTakenAt,
+  resolvePhotoClock,
+  splitPhotoClock,
+  storedPhotoClock,
   tooLargeMessage,
 } from "./photo-upload.ts";
 import { takenLabel } from "./report-entries.ts";
@@ -78,6 +81,93 @@ test("EXIF taken-at: read from a real camera-style JPEG (little-endian) and a bi
   assert.equal(exifTakenAt(jpegWithExif("0000:00:00 00:00:00")), null);
   assert.equal(exifTakenAt(new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0, 1])), null, "garbage length doesn't throw");
   assert.equal(exifIso(null), null);
+});
+
+/** A tiny HEIC whose `iloc` points at an Exif item holding DateTimeOriginal. */
+function heicWithExif(dateTime: string, offset: string | undefined, ilocVersion: 0 | 1): Uint8Array {
+  const strings: [number, string][] = [[0x9003, `${dateTime}\0`]];
+  if (offset) strings.push([0x9011, `${offset}\0`]);
+  const tiff: number[] = [0x4d, 0x4d, 0, 42, 0, 0, 0, 8];
+  const u16 = (v: number) => [(v >> 8) & 255, v & 255];
+  const u32 = (v: number) => [(v >>> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255];
+  tiff.push(...u16(1), ...u16(0x8769), ...u16(4), ...u32(1), ...u32(26), ...u32(0));
+  const dataStart = 26 + 2 + strings.length * 12 + 4;
+  const data: number[] = [];
+  tiff.push(...u16(strings.length));
+  for (const [tag, value] of strings) {
+    tiff.push(...u16(tag), ...u16(2), ...u32(value.length), ...u32(dataStart + data.length));
+    for (const ch of value) data.push(ch.charCodeAt(0));
+  }
+  tiff.push(...u32(0), ...data);
+  const exifPayload = Uint8Array.from([...u32(6), ..."Exif\0\0".split("").map((c) => c.charCodeAt(0)), ...tiff]);
+  const box = (type: string, payload: Uint8Array) => {
+    const out = new Uint8Array(8 + payload.length);
+    const size = out.length;
+    out.set([(size >>> 24) & 255, (size >> 16) & 255, (size >> 8) & 255, size & 255], 0);
+    out.set(type.split("").map((c) => c.charCodeAt(0)), 4);
+    out.set(payload, 8);
+    return out;
+  };
+  const join = (...parts: Uint8Array[]) => {
+    const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let at = 0;
+    for (const part of parts) {
+      out.set(part, at);
+      at += part.length;
+    }
+    return out;
+  };
+  const ftyp = box("ftyp", Uint8Array.from([..."heic\0\0\0\0mif1heic"].map((c) => c.charCodeAt(0))));
+  const infe = box("infe", Uint8Array.from([2, 0, 0, 0, ...u16(1), ...u16(0), ..."Exif".split("").map((c) => c.charCodeAt(0)), 0]));
+  const iinf = box("iinf", join(Uint8Array.from([0, 0, 0, 0]), Uint8Array.from(u16(1)), infe));
+  const ilocFor = (fileOffset: number) => {
+    const body = [ilocVersion, 0, 0, 0, 0x44, 0x00, ...u16(1), ...u16(1)];
+    if (ilocVersion >= 1) body.push(...u16(0));
+    body.push(...u16(0), ...u16(1), ...u32(fileOffset), ...u32(exifPayload.length));
+    return box("iloc", Uint8Array.from(body));
+  };
+  const iloc = ilocFor(0);
+  const metaSize = 8 + 4 + iinf.length + iloc.length;
+  const payloadAt = ftyp.length + metaSize + 8;
+  const meta = box("meta", join(Uint8Array.from([0, 0, 0, 0]), iinf, ilocFor(payloadAt)));
+  return join(ftyp, meta, box("mdat", exifPayload));
+}
+
+test("HEIC DateTimeOriginal is read from the Exif item (iloc v0 and v1), including the offset", () => {
+  assert.deepEqual(exifTakenAt(heicWithExif("2026:10:20 06:45:00", undefined, 0)), { local: "2026-10-20T06:45:00", offset: null });
+  assert.deepEqual(exifTakenAt(heicWithExif("2026:10:19 17:30:05", "-04:00", 1)), { local: "2026-10-19T17:30:05", offset: "-04:00" });
+  assert.equal(exifIso(exifTakenAt(heicWithExif("2026:10:19 17:30:05", "-04:00", 1))), "2026-10-19T21:30:05.000Z");
+  assert.equal(exifTakenAt(heicWithExif("0000:00:00 00:00:00", undefined, 0)), null);
+});
+
+test("photo clock: camera time wins; file lastModified is only a marked fallback", () => {
+  const now = Date.parse("2026-10-20T12:00:00Z");
+  assert.deepEqual(resolvePhotoClock({ exif: "2026-10-20T06:45:00Z", lastModified: Date.parse("2026-10-20T11:00:00Z") }, now), {
+    at: "2026-10-20T06:45:00.000Z",
+    source: "exif",
+  });
+  assert.deepEqual(resolvePhotoClock({ exif: null, lastModified: Date.parse("2026-10-19T15:04:00Z") }, now), {
+    at: "2026-10-19T15:04:00.000Z",
+    source: "file",
+  });
+  // A blank camera clock is not a capture time, so the file time is the fallback.
+  assert.equal(resolvePhotoClock({ exif: "1990-01-01T00:00:00Z", lastModified: Date.parse("2026-10-19T15:04:00Z") }, now)?.source, "file");
+  assert.equal(resolvePhotoClock({ exif: null, lastModified: 0 }, now), null);
+  assert.equal(resolvePhotoClock({ exif: null, lastModified: null }, now), null);
+  assert.deepEqual(splitPhotoClock("2026-10-20T06:45:00.000Z", "exif"), { takenAt: "2026-10-20T06:45:00.000Z", fileTime: null });
+  assert.deepEqual(splitPhotoClock("2026-10-19T15:04:00.000Z", "file"), { takenAt: null, fileTime: "2026-10-19T15:04:00.000Z" });
+  assert.deepEqual(splitPhotoClock("2026-10-20T06:45:00.000Z", null), { takenAt: "2026-10-20T06:45:00.000Z", fileTime: null });
+  assert.deepEqual(storedPhotoClock({ takenAt: "2026-10-20T06:45:00Z", fileTime: "2026-10-20T11:00:00Z", takenSource: "" }), {
+    at: "2026-10-20T06:45:00.000Z",
+    source: "exif",
+  });
+  assert.deepEqual(storedPhotoClock({ takenAt: "", fileTime: "2026-10-19T15:04:00Z", takenSource: "file" }), {
+    at: "2026-10-19T15:04:00.000Z",
+    source: "file",
+  });
+  // A file time is never stored as if the camera took it.
+  assert.equal(storedPhotoClock({ takenAt: "2026-10-20T11:00:00Z", fileTime: "", takenSource: "file" }).source, "file");
+  assert.equal(storedPhotoClock({ takenAt: "", fileTime: "", takenSource: "file" }).at, null);
 });
 
 test("a stored taken-at must be plausible: not before 2000, not more than a day ahead", () => {
