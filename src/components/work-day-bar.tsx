@@ -14,7 +14,9 @@ type Draft = { id?: string; start: string; end: string; projectId: string; proje
 const EMPTY: Draft = { start: "08:00", end: "16:00", projectId: "", projectName: "", notes: "" };
 
 /**
- * The day's 24 hours, with each work session filled in green, and a button to add one.
+ * The day's 24 hours, with each stored work session filled in green.
+ * The daily report passes `canWrite` so a person can still record hours there.
+ * The activity log passes `canWrite={false}`: the bar stays, and the add button does not.
  * `projects` is a job list (id + name). When `freeText` is set, the project is typed instead.
  */
 export function WorkDayBar({

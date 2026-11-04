@@ -18,6 +18,13 @@ export function tooLargeMessage(size: number): string | null {
 
 const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]);
 
+/** A photo the drop zone will accept: any image type, plus HEIC/HEIF named files phones often leave untyped. */
+export function isPhotoFile(file: { type?: string; name?: string }): boolean {
+  const type = (file.type ?? "").toLowerCase();
+  if (type.startsWith("image/")) return true;
+  return /\.(heic|heif|jpe?g|png|webp|gif)$/i.test(file.name ?? "");
+}
+
 /** HEIC/HEIF (iPhone photos): by type, by extension, or by the "ftyp" brand in the first bytes. */
 export function isHeic(file: { type?: string; name?: string }, head?: Uint8Array): boolean {
   const type = (file.type ?? "").toLowerCase();

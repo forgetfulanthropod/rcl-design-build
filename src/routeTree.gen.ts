@@ -22,6 +22,7 @@ import { Route as DeskSettingsRouteImport } from './routes/_desk.settings'
 import { Route as DeskTeamRouteImport } from './routes/_desk.team'
 import { Route as DeskTodayRouteImport } from './routes/_desk.today'
 import { Route as MTokenRouteImport } from './routes/m.$token'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as StageTokenRouteImport } from './routes/stage.$token'
 import { Route as DeskDocsIndexRouteImport } from './routes/_desk.docs.index'
 import { Route as DeskDocsDocIdRouteImport } from './routes/_desk.docs.$docId'
@@ -93,6 +94,11 @@ const MTokenRoute = MTokenRouteImport.update({
   path: '/m/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StageTokenRoute = StageTokenRouteImport.update({
   id: '/stage/$token',
   path: '/stage/$token',
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/team': typeof DeskTeamRoute
   '/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
+  '/share/$token': typeof ShareTokenRoute
   '/stage/$token': typeof StageTokenRoute
   '/docs/$docId': typeof DeskDocsDocIdRoute
   '/reports/$reportId': typeof DeskReportsReportIdRoute
@@ -156,6 +163,7 @@ export interface FileRoutesByTo {
   '/team': typeof DeskTeamRoute
   '/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
+  '/share/$token': typeof ShareTokenRoute
   '/stage/$token': typeof StageTokenRoute
   '/': typeof DeskIndexRoute
   '/docs/$docId': typeof DeskDocsDocIdRoute
@@ -178,6 +186,7 @@ export interface FileRoutesById {
   '/_desk/team': typeof DeskTeamRoute
   '/_desk/today': typeof DeskTodayRoute
   '/m/$token': typeof MTokenRoute
+  '/share/$token': typeof ShareTokenRoute
   '/stage/$token': typeof StageTokenRoute
   '/_desk/': typeof DeskIndexRoute
   '/_desk/docs/$docId': typeof DeskDocsDocIdRoute
@@ -201,6 +210,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/today'
     | '/m/$token'
+    | '/share/$token'
     | '/stage/$token'
     | '/docs/$docId'
     | '/reports/$reportId'
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/today'
     | '/m/$token'
+    | '/share/$token'
     | '/stage/$token'
     | '/'
     | '/docs/$docId'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/_desk/team'
     | '/_desk/today'
     | '/m/$token'
+    | '/share/$token'
     | '/stage/$token'
     | '/_desk/'
     | '/_desk/docs/$docId'
@@ -255,6 +267,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   TrackingRoute: typeof TrackingRoute
   MTokenRoute: typeof MTokenRoute
+  ShareTokenRoute: typeof ShareTokenRoute
   StageTokenRoute: typeof StageTokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
@@ -352,6 +365,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/stage/$token': {
       id: '/stage/$token'
       path: '/stage/$token'
@@ -436,6 +456,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   TrackingRoute: TrackingRoute,
   MTokenRoute: MTokenRoute,
+  ShareTokenRoute: ShareTokenRoute,
   StageTokenRoute: StageTokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
