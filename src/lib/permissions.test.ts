@@ -152,6 +152,22 @@ test("daily reports: everyone writes, only principals review", () => {
   for (const r of ["owner", "admin", "superadmin"]) assert.ok(can(r, "report.review"), r);
 });
 
+test("work sessions: everyone logs their own; a lead can see the crew; only principals edit someone else's", () => {
+  for (const r of ["owner", "admin", "superadmin", "lead", "labor", "sub"]) assert.equal(can(r, "session.write"), true, r);
+  for (const r of ["owner", "admin", "superadmin", "lead"]) assert.equal(can(r, "session.review"), true, r);
+  for (const r of ["labor", "sub"]) {
+    assert.equal(can(r, "session.review"), false, r);
+    assert.throws(() => assertCan(r, "session.review"), /can't do that \(session\.review\)/);
+  }
+  for (const r of ["owner", "admin", "superadmin"]) assert.equal(can(r, "session.manage"), true, r);
+  for (const r of ["lead", "labor", "sub"]) {
+    assert.equal(can(r, "session.manage"), false, r);
+    assert.throws(() => assertCan(r, "session.manage"), /can't do that \(session\.manage\)/);
+  }
+  assert.equal(can("hacker", "session.write"), false);
+  assert.equal(can("field", "session.write"), true); // legacy field → labor
+});
+
 test("sharing grants (spec 06): settings add on top of the role matrix and never take away", () => {
   const off = { ...SHARING_DEFAULTS };
   const laborSend = { ...SHARING_DEFAULTS, labor_doc_send: true };

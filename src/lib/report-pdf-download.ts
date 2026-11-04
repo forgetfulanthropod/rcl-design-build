@@ -1,7 +1,7 @@
 /** Browser side of "Download PDF": fetch what the server allows, build the PDF, save it. */
 import { getReportPdfData, getReportPhoto } from "@/lib/server/fns";
 import { buildReportPdf, reportPdfFileName, type ReportPdfEntry } from "@/lib/report-pdf";
-import { entryStamp, takenLabel } from "@/lib/report-entries";
+import { entryStamp, photoClockLabel } from "@/lib/report-entries";
 import { clock, localDay } from "@/components/today-report";
 
 const TAKEN_FMT = {
@@ -48,8 +48,10 @@ export async function downloadReportPdf(target: PdfTarget): Promise<string> {
   const data = await getReportPdfData({ data: target });
   const entries: ReportPdfEntry[] = [];
   for (const e of data.entries) {
-    const taken = e.kind === "photo" ? takenLabel(e.takenAt, e.createdAt, TAKEN_FMT) : "";
-    const stamp = entryStamp(e, (v) => clock(v)) + (taken ? ` · ${taken}` : "");
+    const clockFields = { takenAt: e.takenAt, fileTime: e.fileTime };
+    const taken = e.kind === "photo" ? photoClockLabel(clockFields, e.createdAt, TAKEN_FMT) : "";
+    const headline = e.kind === "photo" && e.takenAt ? clock(e.takenAt) : entryStamp(e, (v) => clock(v));
+    const stamp = headline + (taken ? ` · ${taken}` : "");
     if (e.kind === "text") {
       entries.push({ kind: "text", stamp, body: e.body });
       continue;
@@ -72,6 +74,7 @@ export async function downloadReportPdf(target: PdfTarget): Promise<string> {
     status: data.submittedAt ? `Submitted ${clock(data.submittedAt)}` : "Not submitted yet",
     generated: new Date().toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
     entries,
+    sessions: data.sessions,
   });
   const name = reportPdfFileName(data.userName, data.day);
   const url = URL.createObjectURL(new Blob([pdf as BlobPart], { type: "application/pdf" }));

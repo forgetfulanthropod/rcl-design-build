@@ -361,9 +361,10 @@ export const saveMyReport = createServerFn({ method: "POST" })
 
 export const addMyPhoto = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { day: string; image: string; thumb: string; width: number; height: number; takenAt: string }) => {
+  .validator((input: { day: string; image: string; thumb: string; width: number; height: number; takenAt: string; fileTime?: string; takenSource?: string }) => {
     if (typeof input?.image !== "string" || input.image.length > 4_500_000) throw new Error("That photo is too large.");
     if (typeof input?.thumb !== "string" || input.thumb.length > 300_000) throw new Error("That photo is too large.");
+    const source = input?.takenSource === "file" || input?.takenSource === "exif" ? input.takenSource : "";
     return {
       day: dayArg(input.day),
       image: input.image,
@@ -371,6 +372,8 @@ export const addMyPhoto = createServerFn({ method: "POST" })
       width: Number(input.width) || 0,
       height: Number(input.height) || 0,
       takenAt: optional(input.takenAt, 40),
+      fileTime: optional(input.fileTime, 40),
+      takenSource: source,
     };
   })
   .handler(async ({ data, context }) => {
@@ -464,6 +467,57 @@ export const getReportPhoto = createServerFn({ method: "GET" })
     const photo = await readPhoto(context.userId, data.id);
     if (!photo) throw new Error("Photo not found.");
     return { url: `data:${photo.mime};base64,${photo.bytes.toString("base64")}` };
+  });
+
+function sessionDraft(input: { day?: string; projectId?: string; startMin?: number; endMin?: number; notes?: string }) {
+  const startMin = Number(input?.startMin);
+  const endMin = Number(input?.endMin);
+  if (!Number.isFinite(startMin) || !Number.isFinite(endMin)) throw new Error("Enter a start and end time.");
+  return {
+    day: dayArg(input?.day),
+    projectId: required(input?.projectId, 80, "Project"),
+    startMin,
+    endMin,
+    notes: optional(input?.notes, 500),
+  };
+}
+
+export const listWorkSessions = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; scope?: string; personId?: string }) => {
+    const scope = input?.scope === "company" ? "company" : "mine";
+    return { day: dayArg(input?.day), scope, personId: optional(input?.personId, 80) } as const;
+  })
+  .handler(async ({ data, context }) => {
+    const { listSessions } = await import("./sessions.server");
+    return listSessions(context.userId, data);
+  });
+
+export const createWorkSession = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { day: string; projectId: string; startMin: number; endMin: number; notes?: string }) => sessionDraft(input))
+  .handler(async ({ data, context }) => {
+    const { createSession } = await import("./sessions.server");
+    return createSession(context.userId, data);
+  });
+
+export const updateWorkSession = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; day?: string; projectId: string; startMin: number; endMin: number; notes?: string }) => ({
+    id: required(input?.id, 80, "Session"),
+    ...sessionDraft(input),
+  }))
+  .handler(async ({ data, context }) => {
+    const { updateSession } = await import("./sessions.server");
+    return updateSession(context.userId, data);
+  });
+
+export const deleteWorkSession = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Session") }))
+  .handler(async ({ data, context }) => {
+    const { deleteSession } = await import("./sessions.server");
+    return deleteSession(context.userId, data.id);
   });
 
 export const listActivities = createServerFn({ method: "GET" })

@@ -1,6 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { PdfDoc } from "@/lib/pdf";
+import { drawSessionCaption } from "@/lib/session-caption";
+import { photoClockLabel } from "@/lib/report-entries";
+import { preparePhoto } from "@/lib/photo-prepare";
+import { WorkDayBar } from "@/components/work-day-bar";
+import type { PhotoTimeSource } from "@/lib/photo-upload";
+import type { WorkSession } from "@/lib/work-sessions";
 
 type Entry = {
   id: string;
@@ -11,13 +17,19 @@ type Entry = {
   lat?: number;
   lng?: number;
   project?: string;
+  /** Capture clock when this is a photo: camera time, or file time when there is no EXIF. */
+  takenAt?: string | null;
+  takenSource?: PhotoTimeSource | null;
 };
 
 type DayLog = Record<string, Entry[]>;
 type TimeOverrides = Record<string, Record<string, number>>;
+type StoredSession = { id: string; startMin: number; endMin: number; project: string; notes: string };
+type SessionLog = Record<string, StoredSession[]>;
 
 const STORAGE_KEY = "rcl-tracking-log";
 const TIMES_KEY = "rcl-tracking-times";
+const SESSIONS_KEY = "rcl-tracking-sessions";
 const SAMPLE_DAY = "2026-11-02";
 
 function todayKey(): string {
@@ -51,6 +63,29 @@ function saveTimes(times: TimeOverrides) {
   localStorage.setItem(TIMES_KEY, JSON.stringify(times));
 }
 
+function loadSessions(): SessionLog {
+  try {
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveSessions(sessions: SessionLog) {
+  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+}
+
+function swatch(label: string, color: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="${color}"/><text x="50%" y="50%" font-size="32" fill="white" text-anchor="middle" dy=".3em" font-family="sans-serif">${label}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const SAMPLE_SESSIONS: StoredSession[] = [
+  { id: "ss-a", startMin: 8 * 60, endMin: 11 * 60 + 30, project: "Project A", notes: "demolish fence" },
+  { id: "ss-b", startMin: 13 * 60, endMin: 16 * 60, project: "Project B", notes: "drywall takeoffs" },
+];
+
 function seedSampleIfEmpty(log: DayLog): DayLog {
   if (Object.keys(log).length > 0) return log;
   const sample: Entry[] = [
@@ -58,8 +93,8 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
       id: "s1",
       ts: `${SAMPLE_DAY}T08:32:00.000Z`,
       kind: "text",
-      body: "Picked up Mr Smith’s terrier. Energetic start, good leash manners.",
-      project: "Mr Smith terrier",
+      body: "Demolish the alley fence. Posts were rotten at the base.",
+      project: "Project A",
       lat: 38.04,
       lng: -84.5,
     },
@@ -67,36 +102,36 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
       id: "s1p",
       ts: `${SAMPLE_DAY}T08:40:00.000Z`,
       kind: "photo",
-      dataUrl: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzRhNTU2OCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjI0IiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk1yIFNtaXRoIFRlcnJpZXI8L3RleHQ+PC9zdmc+",
-      project: "Mr Smith terrier",
+      dataUrl: swatch("Project A · fence", "#3d4a3a"),
+      project: "Project A",
     },
     {
       id: "s2",
       ts: `${SAMPLE_DAY}T09:05:00.000Z`,
       kind: "text",
-      body: "Walked the neighborhood loop. Terrier wanted to chase squirrels.",
-      project: "Mr Smith terrier",
+      body: "Hauled the old boards and marked the post holes for the new line.",
+      project: "Project A",
     },
     {
       id: "s3",
       ts: `${SAMPLE_DAY}T10:15:00.000Z`,
       kind: "text",
-      body: "Picked up Mrs Jones’s schnauzer. Calm and well-trained.",
-      project: "Mrs Jones schnauzer",
+      body: "Started drywall takeoffs for the upstairs bedrooms.",
+      project: "Project B",
     },
     {
       id: "s3p",
       ts: `${SAMPLE_DAY}T10:22:00.000Z`,
       kind: "photo",
-      dataUrl: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MDAiIGhlaWdodD0iMzAwIj48cmVjdCB3aWR0aD0iNDAwIiBoZWlnaHQ9IjMwMCIgZmlsbD0iIzJkMzc0OCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjI0IiBmaWxsPSJ3aGl0ZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk1ycyBKb25lcyBTY2huYXV6ZXI8L3RleHQ+PC9zdmc+",
-      project: "Mrs Jones schnauzer",
+      dataUrl: swatch("Project B · drywall", "#3a3328"),
+      project: "Project B",
     },
     {
       id: "s4",
       ts: `${SAMPLE_DAY}T11:40:00.000Z`,
       kind: "text",
-      body: "Park time with both dogs. They played well together.",
-      project: "Mrs Jones schnauzer",
+      body: "Counted sheets and noted the damaged box in the garage.",
+      project: "Project B",
     },
     {
       id: "s5",
@@ -109,15 +144,15 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
       id: "s6",
       ts: `${SAMPLE_DAY}T13:45:00.000Z`,
       kind: "text",
-      body: "Dropped schnauzer back. Mrs Jones happy with the report.",
-      project: "Mrs Jones schnauzer",
+      body: "Dropped the takeoff with the office and locked the gate.",
+      project: "Project B",
     },
     {
       id: "s7",
       ts: `${SAMPLE_DAY}T14:50:00.000Z`,
       kind: "text",
-      body: "Final walk with terrier and drop-off. All good.",
-      project: "Mr Smith terrier",
+      body: "Backfilled the fence line and left the site clean.",
+      project: "Project A",
     },
   ];
   const next = { ...log, [SAMPLE_DAY]: sample };
@@ -127,6 +162,22 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
 
 function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+const PHOTO_FMT = {
+  clock: (iso: string) => clock(iso),
+  dayKey: (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  },
+  shortDay: (iso: string) => new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" }),
+};
+
+/** The time a photo entry shows: camera time, or file time marked as not the camera. */
+function photoWhen(e: Entry): string {
+  if (e.kind !== "photo") return clock(e.ts);
+  const fields = e.takenSource === "file" ? { fileTime: e.takenAt } : { takenAt: e.takenAt };
+  return photoClockLabel(fields, e.ts, PHOTO_FMT) || clock(e.ts);
 }
 
 function formatMinutes(mins: number): string {
@@ -175,7 +226,13 @@ async function dataUrlToJpeg(dataUrl: string): Promise<Uint8Array | null> {
   }
 }
 
-function buildDayPdf(day: string, entries: Entry[], jpegs: Map<string, Uint8Array | null>, projectTimes: { project: string; minutes: number }[]): Uint8Array {
+function buildDayPdf(
+  day: string,
+  entries: Entry[],
+  jpegs: Map<string, Uint8Array | null>,
+  projectTimes: { project: string; minutes: number }[],
+  sessions: WorkSession[],
+): Uint8Array {
   const doc = new PdfDoc();
   doc.paragraph("Activity log", 22, { bold: true, leading: 28 });
   doc.gap(4);
@@ -185,11 +242,10 @@ function buildDayPdf(day: string, entries: Entry[], jpegs: Map<string, Uint8Arra
   if (entries.length === 0) doc.paragraph("Nothing logged yet.", 11, { gray: 0.35 });
   for (const e of entries) {
     doc.gap(8);
-    const stamp = clock(e.ts);
     const loc = e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
     const label = e.kind === "photo" ? "Photo" : e.kind === "project" ? "Project" : e.kind === "lunch" ? "Lunch" : "Note";
     doc.ensure(20);
-    doc.paragraph(`${stamp}${loc} · ${label}`, 9.5, { bold: true, gray: 0.4 });
+    doc.paragraph(`${photoWhen(e)}${loc} · ${label}`, 9.5, { bold: true, gray: 0.4 });
     if (e.body) doc.paragraph(e.body, 11.5);
     if (e.project) doc.paragraph(`Project: ${e.project}`, 11);
     if (e.kind === "photo") {
@@ -201,6 +257,7 @@ function buildDayPdf(day: string, entries: Entry[], jpegs: Map<string, Uint8Arra
       }
     }
   }
+  drawSessionCaption(doc, sessions);
   if (projectTimes.length > 0) {
     doc.gap(12);
     doc.rule();
@@ -226,16 +283,21 @@ function TrackingPage() {
   const [day, setDay] = useState(todayKey());
   const [log, setLog] = useState<DayLog>({});
   const [times, setTimes] = useState<TimeOverrides>({});
+  const [sessions, setSessions] = useState<SessionLog>({});
   const [project, setProject] = useState("");
-  const [text, setText] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const loaded = seedSampleIfEmpty(loadLog());
     setLog(loaded);
     setTimes(loadTimes());
+    const stored = loadSessions();
+    if (!stored[SAMPLE_DAY] && loaded[SAMPLE_DAY]) stored[SAMPLE_DAY] = SAMPLE_SESSIONS;
+    setSessions(stored);
+    saveSessions(stored);
     if (loaded[SAMPLE_DAY] && !loaded[todayKey()]) {
       setDay(SAMPLE_DAY);
     }
@@ -246,6 +308,28 @@ function TrackingPage() {
   }, [log]);
 
   const entries = (log[day] ?? []).slice().sort((a, b) => a.ts.localeCompare(b.ts));
+
+  const daySessions = useMemo<WorkSession[]>(
+    () =>
+      (sessions[day] ?? []).map((session) => ({
+        id: session.id,
+        day,
+        projectId: null,
+        projectName: session.project,
+        startMin: session.startMin,
+        endMin: session.endMin,
+        notes: session.notes,
+      })),
+    [sessions, day],
+  );
+
+  const projectChoices = useMemo(() => {
+    const names = new Set<string>();
+    for (const entry of entries) if (entry.project) names.add(entry.project);
+    for (const session of daySessions) names.add(session.projectName);
+    if (project.trim()) names.add(project.trim());
+    return [...names].map((name) => ({ id: name, name }));
+  }, [entries, daySessions, project]);
 
   const autoProjectMinutes = useMemo(() => {
     const result: Record<string, number> = {};
@@ -300,26 +384,33 @@ function TrackingPage() {
     saveLog(next);
   }
 
-  function addNote() {
-    if (!text.trim()) return;
-    void addEntry({ kind: "text", body: text.trim() });
-    setText("");
-    setMenuOpen(false);
-  }
-
   function addLunch() {
     void addEntry({ kind: "lunch", body: "Lunch" });
     setMenuOpen(false);
   }
 
   function addPhoto(file: File) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      void addEntry({ kind: "photo", dataUrl });
-    };
-    reader.readAsDataURL(file);
+    setBusy(true);
+    setPhotoError("");
     setMenuOpen(false);
+    void preparePhoto(file)
+      .then((photo) => {
+        void addEntry({
+          kind: "photo",
+          dataUrl: photo.image,
+          takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
+          takenSource: photo.takenSource,
+        });
+      })
+      .catch((cause: unknown) => {
+        setPhotoError(cause instanceof Error ? cause.message : "Couldn't read that photo.");
+      })
+      .finally(() => setBusy(false));
+  }
+
+  function writeSessions(next: SessionLog) {
+    setSessions(next);
+    saveSessions(next);
   }
 
   function setProjectMinutes(proj: string, minutes: number) {
@@ -346,8 +437,8 @@ function TrackingPage() {
           jpegs.set(e.id, await dataUrlToJpeg(e.dataUrl));
         }
       }
-      const pdf = buildDayPdf(day, entries, jpegs, displayTimes);
-      const blob = new Blob([pdf], { type: "application/pdf" });
+      const pdf = buildDayPdf(day, entries, jpegs, displayTimes, daySessions);
+      const blob = new Blob([pdf as BlobPart], { type: "application/pdf" });
       const file = new File([blob], `tracking-${day}.pdf`, { type: "application/pdf" });
 
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
@@ -417,16 +508,43 @@ function TrackingPage() {
 
       {isSample && (
         <div className="mb-4 rounded border border-dashed border-green-600/40 bg-green-600/5 p-3 text-sm">
-          This is a sample day of dog walking. Switch projects (clients) as you go. Tap + Today to start your own day.
+          This is a sample day. Green on the bar is hours from work sessions. Tap + Today to start your own day.
         </div>
       )}
 
-      <label className="mb-4 block text-sm">
+      <WorkDayBar
+        sessions={daySessions}
+        projects={projectChoices}
+        freeText
+        canWrite
+        onSave={(input) => {
+          const row: StoredSession = {
+            id: input.id ?? crypto.randomUUID(),
+            startMin: input.startMin,
+            endMin: input.endMin,
+            project: input.projectName,
+            notes: input.notes,
+          };
+          const list = sessions[day] ?? [];
+          const next = { ...sessions, [day]: input.id ? list.map((item) => (item.id === input.id ? row : item)) : [...list, row] };
+          writeSessions(next);
+        }}
+        onDelete={(id) => {
+          writeSessions({ ...sessions, [day]: (sessions[day] ?? []).filter((item) => item.id !== id) });
+        }}
+      />
+      {photoError ? (
+        <p className="mt-3 text-sm text-danger" role="alert">
+          {photoError}
+        </p>
+      ) : null}
+
+      <label className="mb-4 mt-4 block text-sm">
         Current project / client
         <input
           value={project}
           onChange={(e) => setProject(e.target.value)}
-          placeholder="e.g. Mr Smith terrier"
+          placeholder="e.g. Project A"
           className="mt-1 block w-full rounded border border-line bg-raised px-3 py-2"
         />
       </label>
@@ -456,7 +574,7 @@ function TrackingPage() {
           entries.map((e) => (
             <div key={e.id} className="rounded border border-line bg-raised p-3">
               <div className="mb-1 text-xs text-muted">
-                {clock(e.ts)}
+                {photoWhen(e)}
                 {e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}` : ""}
                 {e.project ? ` · ${e.project}` : ""}
               </div>
@@ -553,7 +671,7 @@ function TrackingPage() {
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];

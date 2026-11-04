@@ -131,3 +131,21 @@ export function takenLabel(
   const sameDay = !Number.isNaN(added) && fmt.dayKey(takenAt) === fmt.dayKey(addedAt);
   return `taken ${sameDay ? "" : `${fmt.shortDay(takenAt)}, `}${fmt.clock(takenAt)}`;
 }
+
+export type PhotoClockFields = { takenAt?: string | null; fileTime?: string | null };
+
+/**
+ * What to show beside a photo. Camera time uses `taken …` (and hides itself when it is the
+ * same minute the photo was added). A file-modified fallback is always marked "(not camera)"
+ * so it is never presented as the moment the shutter fired.
+ */
+export function photoClockLabel(
+  photo: PhotoClockFields,
+  addedAt: string,
+  fmt: { clock: (iso: string) => string; dayKey: (iso: string) => string; shortDay: (iso: string) => string },
+): string {
+  if (photo.takenAt) return takenLabel(photo.takenAt, addedAt, fmt);
+  if (!photo.fileTime || Number.isNaN(Date.parse(photo.fileTime))) return "";
+  const sameDay = fmt.dayKey(photo.fileTime) === fmt.dayKey(addedAt);
+  return `file time ${sameDay ? "" : `${fmt.shortDay(photo.fileTime)}, `}${fmt.clock(photo.fileTime)} (not camera)`;
+}

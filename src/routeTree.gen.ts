@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as DeskRouteImport } from './routes/_desk'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as TrackingRouteImport } from './routes/tracking'
 import { Route as DeskIndexRouteImport } from './routes/_desk.index'
 import { Route as DeskActivitiesRouteImport } from './routes/_desk.activities'
 import { Route as DeskAttentionRouteImport } from './routes/_desk.attention'
@@ -27,7 +28,6 @@ import { Route as DeskDocsDocIdRouteImport } from './routes/_desk.docs.$docId'
 import { Route as DeskReportsIndexRouteImport } from './routes/_desk.reports.index'
 import { Route as DeskReportsReportIdRouteImport } from './routes/_desk.reports.$reportId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as TrackingRouteImport } from './routes/tracking'
 
 const DeskRoute = DeskRouteImport.update({
   id: '/_desk',
@@ -36,6 +36,11 @@ const DeskRoute = DeskRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrackingRoute = TrackingRouteImport.update({
+  id: '/tracking',
+  path: '/tracking',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeskIndexRoute = DeskIndexRouteImport.update({
@@ -118,15 +123,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TrackingRoute = TrackingRouteImport.update({
-  id: '/tracking',
-  path: '/tracking',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof DeskIndexRoute
   '/login': typeof LoginRoute
+  '/tracking': typeof TrackingRoute
   '/activities': typeof DeskActivitiesRoute
   '/attention': typeof DeskAttentionRoute
   '/crew': typeof DeskCrewRoute
@@ -142,10 +143,10 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/docs/': typeof DeskDocsIndexRoute
   '/reports/': typeof DeskReportsIndexRoute
-  '/tracking': typeof TrackingRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
+  '/tracking': typeof TrackingRoute
   '/activities': typeof DeskActivitiesRoute
   '/attention': typeof DeskAttentionRoute
   '/crew': typeof DeskCrewRoute
@@ -162,12 +163,12 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/docs': typeof DeskDocsIndexRoute
   '/reports': typeof DeskReportsIndexRoute
-  '/tracking': typeof TrackingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_desk': typeof DeskRouteWithChildren
   '/login': typeof LoginRoute
+  '/tracking': typeof TrackingRoute
   '/_desk/activities': typeof DeskActivitiesRoute
   '/_desk/attention': typeof DeskAttentionRoute
   '/_desk/crew': typeof DeskCrewRoute
@@ -184,13 +185,13 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/_desk/docs/': typeof DeskDocsIndexRoute
   '/_desk/reports/': typeof DeskReportsIndexRoute
-  '/tracking': typeof TrackingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/login'
+    | '/tracking'
     | '/activities'
     | '/attention'
     | '/crew'
@@ -206,10 +207,10 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/docs/'
     | '/reports/'
-    | '/tracking'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
+    | '/tracking'
     | '/activities'
     | '/attention'
     | '/crew'
@@ -226,11 +227,11 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/docs'
     | '/reports'
-    | '/tracking'
   id:
     | '__root__'
     | '/_desk'
     | '/login'
+    | '/tracking'
     | '/_desk/activities'
     | '/_desk/attention'
     | '/_desk/crew'
@@ -247,16 +248,15 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/_desk/docs/'
     | '/_desk/reports/'
-    | '/tracking'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   DeskRoute: typeof DeskRouteWithChildren
   LoginRoute: typeof LoginRoute
+  TrackingRoute: typeof TrackingRoute
   MTokenRoute: typeof MTokenRoute
   StageTokenRoute: typeof StageTokenRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
-  TrackingRoute: typeof TrackingRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -273,6 +273,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/tracking': {
+      id: '/tracking'
+      path: '/tracking'
+      fullPath: '/tracking'
+      preLoaderRoute: typeof TrackingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_desk/': {
@@ -387,13 +394,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/tracking': {
-      id: '/tracking'
-      path: '/tracking'
-      fullPath: '/tracking'
-      preLoaderRoute: typeof TrackingRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -434,10 +434,10 @@ const DeskRouteWithChildren = DeskRoute._addFileChildren(DeskRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   DeskRoute: DeskRouteWithChildren,
   LoginRoute: LoginRoute,
+  TrackingRoute: TrackingRoute,
   MTokenRoute: MTokenRoute,
   StageTokenRoute: StageTokenRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
-  TrackingRoute: TrackingRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { entryStamp, sortEntries, takenLabel, type ReportEntry } from "@/lib/report-entries";
+import { entryStamp, photoClockLabel, sortEntries, type ReportEntry } from "@/lib/report-entries";
 import { preparePhoto } from "@/lib/photo-prepare";
 import { tooLargeMessage } from "@/lib/photo-upload";
 import { ReportPdfButton } from "@/components/report-pdf-button";
@@ -10,6 +10,7 @@ import { LunchDial } from "@/components/lunch-dial";
 import { ErrorBanner, Skeleton } from "@/components/ui";
 import { PhotoThumb } from "@/components/photo-thumb";
 import { YoureOnCard } from "@/components/crew-view";
+import { ReportWorkSessions } from "@/components/report-work-sessions";
 import { currentJobId, rememberJob } from "@/lib/use-current-job";
 
 type Loaded = Awaited<ReturnType<typeof getMyReport>>;
@@ -180,8 +181,9 @@ export function TodayReport() {
           thumb: photo.thumb,
           width: photo.width,
           height: photo.height,
-          // Only the camera's own time (EXIF); a file's modified date is often just when it was copied.
           takenAt: photo.takenAt ?? "",
+          fileTime: photo.fileTime ?? "",
+          takenSource: photo.takenSource ?? "",
         },
       });
       setPending((list) => list.filter((p) => p.key !== key));
@@ -252,6 +254,7 @@ export function TodayReport() {
   const photos = report.photos.length;
   const thumbs = new Map(report.photos.map((p) => [p.id, p.thumb]));
   const takenAt = new Map(report.photos.map((p) => [p.id, p.takenAt]));
+  const fileTime = new Map(report.photos.map((p) => [p.id, p.fileTime]));
   const hasText =
     Object.values(ed.texts).some((t) => t.trim()) || ed.drafts.some((d) => d.body.trim());
 
@@ -289,6 +292,7 @@ export function TodayReport() {
   return (
     <div className="mx-auto grid max-w-xl gap-4" data-testid="today-report">
       <YoureOnCard />
+      <ReportWorkSessions day={day} jobs={jobs} />
       <section className="rounded-md border border-line bg-surface p-4">
         <p className="text-sm font-medium uppercase tracking-widest text-copper">Daily report</p>
         <h2 className="mt-1 text-2xl">{longDay(day)}</h2>
@@ -368,8 +372,10 @@ export function TodayReport() {
               );
             }
             const e = row.entry;
-            const taken = e.kind === "photo" ? takenLabel(takenAt.get(e.photoId ?? ""), e.createdAt, TAKEN_FMT) : "";
-            const stamp = entryStamp(e, (v) => clock(v)) + (taken ? ` · ${taken}` : "");
+            const fields = { takenAt: takenAt.get(e.photoId ?? "") ?? null, fileTime: fileTime.get(e.photoId ?? "") ?? null };
+            const taken = e.kind === "photo" ? photoClockLabel(fields, e.createdAt, TAKEN_FMT) : "";
+            const headline = e.kind === "photo" && fields.takenAt ? clock(fields.takenAt) : entryStamp(e, (v) => clock(v));
+            const stamp = headline + (taken ? ` · ${taken}` : "");
             return (
               <li key={row.key} data-testid="entry" data-kind={e.kind} data-entry-key={row.key} data-entry-id={e.id}>
                 <p className="text-sm text-muted tabular-nums" data-testid="entry-time">
