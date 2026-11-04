@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useMemo } from "react";
+import { z } from "zod";
 import { photoClockLabel } from "@/lib/report-entries";
 import { preparePhoto } from "@/lib/photo-prepare";
 import { WorkDayBar } from "@/components/work-day-bar";
@@ -8,9 +9,19 @@ import { DayExport } from "@/components/day-export";
 import { buildActivityPdf, type ActivityPdfItem } from "@/lib/activity-pdf";
 import { photoCaptionHeading } from "@/lib/photo-caption";
 import { MAX_CAPTION } from "@/lib/activity-share";
-import { createActivityShare, getMyActivityShare, revokeActivityShare } from "@/lib/server/fns";
+import { useCurrentUserState } from "@/lib/auth/use-current-user";
+import {
+  createActivityShare,
+  createWorkSession,
+  deleteWorkSession,
+  getMyActivityShare,
+  listWorkSessions,
+  loadDesk,
+  revokeActivityShare,
+  updateWorkSession,
+} from "@/lib/server/fns";
 import type { PhotoTimeSource } from "@/lib/photo-upload";
-import type { WorkSession } from "@/lib/work-sessions";
+import { mayAddSession, mayEditSession, mayReviewSessions, type WorkSession } from "@/lib/work-sessions";
 
 type Entry = {
   id: string;
@@ -273,15 +284,21 @@ async function dataUrlToJpeg(dataUrl: string): Promise<Uint8Array | null> {
 }
 
 export const Route = createFileRoute("/tracking")({
+  validateSearch: z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
   component: TrackingPage,
 });
 
 function TrackingPage() {
-  const [day, setDay] = useState(todayKey());
+  const search = Route.useSearch();
+  const [day, setDay] = useState(search.day ?? todayKey());
   const [log, setLog] = useState<DayLog>({});
   const [times, setTimes] = useState<TimeOverrides>({});
   const [sessions, setSessions] = useState<SessionLog>({});
-  const [project, setProject] = useState("");
+  const { user, isPending } = useCurrentUserState();
+  const [serverSessions, setServerSessions] = useState<WorkSession[] | null>(null);
+  const [jobs, setJobs] = useState<{ id: string; name: string }[]>([]);
+  const [role, setRole] = useState<string | null>(null);
+  const [hoursError, setHoursError] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -319,10 +336,9 @@ function TrackingPage() {
     if (!stored[SAMPLE_DAY] && loaded[SAMPLE_DAY]) stored[SAMPLE_DAY] = SAMPLE_SESSIONS;
     setSessions(stored);
     saveSessions(stored);
-    if (loaded[SAMPLE_DAY] && !loaded[todayKey()]) {
-      setDay(SAMPLE_DAY);
-    }
-  }, []);
+    if (search.day) setDay(search.day);
+    else if (loaded[SAMPLE_DAY] && !loaded[todayKey()]) setDay(SAMPLE_DAY);
+  }, [search.day]);
 
   const allDays = useMemo(() => {
     return Object.keys(log).sort().reverse();
@@ -330,7 +346,7 @@ function TrackingPage() {
 
   const entries = (log[day] ?? []).slice().sort((a, b) => a.ts.localeCompare(b.ts));
 
-  const daySessions = useMemo<WorkSession[]>(
+  const localSessions = useMemo<WorkSession[]>(
     () =>
       (sessions[day] ?? []).map((session) => ({
         id: session.id,
@@ -344,13 +360,53 @@ function TrackingPage() {
     [sessions, day],
   );
 
+  const serverMode = Boolean(user) && !isPending && day === todayKey();
+  const usingServer = serverMode && serverSessions !== null && role !== null && !hoursError;
+  const daySessions = usingServer ? serverSessions : localSessions;
+
+  useEffect(() => {
+    if (!serverMode) {
+      setServerSessions(null);
+      setRole(null);
+      setHoursError("");
+      return;
+    }
+    let live = true;
+    setHoursError("");
+    void (async () => {
+      try {
+        const desk = await loadDesk();
+        if (!live) return;
+        if (!("profile" in desk) || desk.needsSetup) {
+          setServerSessions(null);
+          setRole(null);
+          return;
+        }
+        setRole(desk.profile.role);
+        setJobs(desk.projects.filter((job) => !job.archived).map((job) => ({ id: job.id, name: job.name })));
+        const scope = mayReviewSessions(desk.profile.role) ? "company" : "mine";
+        const rows = await listWorkSessions({ data: { day, scope } });
+        if (live) setServerSessions(rows);
+      } catch (cause) {
+        if (!live) return;
+        setHoursError(cause instanceof Error ? cause.message : "Couldn't load hours.");
+        setServerSessions(null);
+        setRole(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [serverMode, user?.id, day]);
+
   const projectChoices = useMemo(() => {
     const names = new Set<string>();
     for (const entry of entries) if (entry.project) names.add(entry.project);
-    for (const session of daySessions) names.add(session.projectName);
-    if (project.trim()) names.add(project.trim());
+    for (const session of localSessions) names.add(session.projectName);
     return [...names].map((name) => ({ id: name, name }));
-  }, [entries, daySessions, project]);
+  }, [entries, localSessions]);
+
+  const activeProject = daySessions.at(-1)?.projectName ?? "";
 
   const autoProjectMinutes = useMemo(() => {
     const result: Record<string, number> = {};
@@ -375,9 +431,8 @@ function TrackingPage() {
   const projectList = useMemo(() => {
     const set = new Set<string>();
     entries.forEach((e) => set.add(e.project || "Unassigned"));
-    if (project) set.add(project);
     return Array.from(set);
-  }, [entries, project]);
+  }, [entries]);
 
   const displayTimes = useMemo(() => {
     const overrides = times[day] || {};
@@ -395,7 +450,7 @@ function TrackingPage() {
     const entry: Entry = {
       id: crypto.randomUUID(),
       ts: new Date().toISOString(),
-      project: project || undefined,
+      project: activeProject || undefined,
       ...partial,
       lat: loc?.lat,
       lng: loc?.lng,
@@ -424,7 +479,7 @@ function TrackingPage() {
           kind: "photo",
           body: "",
           dataUrl: photo.image,
-          project: project || undefined,
+          project: activeProject || undefined,
           takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
           takenSource: photo.takenSource,
         });
@@ -450,18 +505,59 @@ function TrackingPage() {
     saveLog(next);
   }
 
+  function writeSessions(next: SessionLog) {
+    setSessions(next);
+    saveSessions(next);
+  }
+
+  function saveLocal(input: { id?: string; projectName: string; startMin: number; endMin: number; notes: string }) {
+    const row: StoredSession = {
+      id: input.id ?? crypto.randomUUID(),
+      startMin: input.startMin,
+      endMin: input.endMin,
+      project: input.projectName,
+      notes: input.notes,
+    };
+    const list = sessions[day] ?? [];
+    writeSessions({ ...sessions, [day]: input.id ? list.map((item) => (item.id === input.id ? row : item)) : [...list, row] });
+  }
+
+  function deleteLocal(id: string) {
+    writeSessions({ ...sessions, [day]: (sessions[day] ?? []).filter((item) => item.id !== id) });
+  }
+
+  async function saveServer(input: { id?: string; projectId: string | null; startMin: number; endMin: number; notes: string }) {
+    if (!input.projectId) throw new Error("Choose a project.");
+    const saved = input.id
+      ? await updateWorkSession({
+          data: { id: input.id, day, projectId: input.projectId, startMin: input.startMin, endMin: input.endMin, notes: input.notes },
+        })
+      : await createWorkSession({
+          data: { day, projectId: input.projectId, startMin: input.startMin, endMin: input.endMin, notes: input.notes },
+        });
+    setServerSessions((list) => {
+      const next = (list ?? []).filter((session) => session.id !== saved.id);
+      next.push(saved);
+      return next;
+    });
+  }
+
+  async function deleteServer(id: string) {
+    await deleteWorkSession({ data: { id } });
+    setServerSessions((list) => (list ?? []).filter((session) => session.id !== id));
+  }
+
   function setProjectMinutes(proj: string, minutes: number) {
     const next = { ...times, [day]: { ...(times[day] || {}), [proj]: minutes } };
     setTimes(next);
     saveTimes(next);
   }
 
-  function createToday() {
-    setDay(todayKey());
-    if (!log[todayKey()]) {
-      const next = { ...log, [todayKey()]: [] };
-      setLog(next);
-      saveLog(next);
+  function ensureDay(next: string) {
+    if (next && !log[next]) {
+      const updated = { ...log, [next]: [] as Entry[] };
+      setLog(updated);
+      saveLog(updated);
     }
   }
 
@@ -637,31 +733,32 @@ function TrackingPage() {
       <div className="mb-4">
         <div className="mb-2 flex items-center justify-between text-sm">
           <span className="font-medium">Your days</span>
-          <button
-            type="button"
-            onClick={createToday}
-            className="rounded border border-line px-2 py-1 text-xs"
+          <a
+            href={`/tracking?day=${todayKey()}`}
+            data-testid="go-today"
+            className="rounded border border-line px-2 py-1 text-xs text-fg no-underline"
+            onClick={() => ensureDay(todayKey())}
           >
             + Today
-          </button>
+          </a>
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           {allDays.length === 0 ? (
             <span className="text-xs text-muted">No days yet</span>
           ) : (
             allDays.map((d) => (
-              <button
+              <a
                 key={d}
-                type="button"
-                onClick={() => setDay(d)}
-                className={`shrink-0 rounded-full border px-3 py-1 text-xs ${
-                  d === day ? "border-green-600 bg-green-600 text-white" : "border-line bg-raised"
+                href={`/tracking?day=${d}`}
+                onClick={() => ensureDay(d)}
+                className={`shrink-0 rounded-full border px-3 py-1 text-xs no-underline ${
+                  d === day ? "border-green-600 bg-green-600 text-white" : "border-line bg-raised text-fg"
                 }`}
               >
                 {formatDayLabel(d)}
                 {d === SAMPLE_DAY ? " · sample" : ""}
                 <span className="ml-1 opacity-70">({(log[d] ?? []).length})</span>
-              </button>
+              </a>
             ))
           )}
         </div>
@@ -669,11 +766,29 @@ function TrackingPage() {
 
       {isSample && (
         <div className="mb-4 rounded border border-dashed border-green-600/40 bg-green-600/5 p-3 text-sm">
-          This is a sample day. Green on the bar is hours already saved. Drop photos below and write a caption under each one.
+          This is a sample day. Hours worked are the lettered sessions. Add or edit one to change the green bar.
         </div>
       )}
 
-      <WorkDayBar sessions={daySessions} projects={projectChoices} freeText canWrite={false} onSave={() => {}} onDelete={() => {}} />
+      {hoursError ? (
+        <p className="mb-3 text-sm text-danger" role="alert">
+          {hoursError}
+        </p>
+      ) : null}
+      <WorkDayBar
+        sessions={daySessions}
+        projects={usingServer ? jobs : projectChoices}
+        freeText={!usingServer}
+        canWrite={usingServer ? mayAddSession(role ?? "") : !serverMode || Boolean(hoursError)}
+        canEditSession={
+          usingServer && user && role
+            ? (session) => mayEditSession(role, session.userId, user.id)
+            : undefined
+        }
+        dayLabel={`${formatDayLabel(day)}${isSample ? " · sample" : ""}`}
+        onSave={usingServer ? saveServer : saveLocal}
+        onDelete={usingServer ? deleteServer : deleteLocal}
+      />
       <div className="mt-4">
         <PhotoDrop busy={photoBusy} onFiles={(files) => void addPhotos(files)} />
       </div>
@@ -683,35 +798,7 @@ function TrackingPage() {
         </p>
       ) : null}
 
-      <label className="mb-4 mt-4 block text-sm">
-        Current project / client
-        <input
-          value={project}
-          onChange={(e) => setProject(e.target.value)}
-          placeholder="e.g. Project A"
-          className="mt-1 block w-full rounded border border-line bg-raised px-3 py-2"
-        />
-      </label>
-
-      <label className="mb-4 block text-sm">
-        Day
-        <input
-          type="date"
-          value={day}
-          onChange={(e) => {
-            const v = e.target.value;
-            setDay(v);
-            if (v && !log[v]) {
-              const next = { ...log, [v]: [] };
-              setLog(next);
-              saveLog(next);
-            }
-          }}
-          className="mt-1 block w-full rounded border border-line bg-raised px-3 py-2"
-        />
-      </label>
-
-      <div className="mb-6 space-y-3">
+      <div className="mb-6 mt-4 space-y-3">
         {entries.length === 0 ? (
           <p className="text-muted">No entries for this day yet. Drop photos above, or use the green button for a note or lunch.</p>
         ) : (

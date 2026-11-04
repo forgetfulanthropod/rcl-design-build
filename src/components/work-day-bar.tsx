@@ -14,9 +14,8 @@ type Draft = { id?: string; start: string; end: string; projectId: string; proje
 const EMPTY: Draft = { start: "08:00", end: "16:00", projectId: "", projectName: "", notes: "" };
 
 /**
- * The day's 24 hours, with each stored work session filled in green.
- * The daily report passes `canWrite` so a person can still record hours there.
- * The activity log passes `canWrite={false}`: the bar stays, and the add button does not.
+ * The day's 24 hours. Each green block is a lettered session (a, b, c…) with a job and a start and end.
+ * `canWrite` shows Add session. A row's Edit and Remove follow `canEditSession` (own hours vs someone else's).
  * `projects` is a job list (id + name). When `freeText` is set, the project is typed instead.
  */
 export function WorkDayBar({
@@ -24,6 +23,8 @@ export function WorkDayBar({
   projects,
   freeText = false,
   canWrite,
+  canEditSession,
+  dayLabel,
   onSave,
   onDelete,
 }: {
@@ -31,6 +32,9 @@ export function WorkDayBar({
   projects: { id: string; name: string }[];
   freeText?: boolean;
   canWrite: boolean;
+  /** Defaults to canWrite for every row. */
+  canEditSession?: (session: WorkSession) => boolean;
+  dayLabel?: string;
   onSave: (input: { id?: string; projectId: string | null; projectName: string; startMin: number; endMin: number; notes: string }) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
 }) {
@@ -40,6 +44,7 @@ export function WorkDayBar({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const total = labeled.reduce((sum, session) => sum + sessionMinutes(session), 0);
+  const editable = (session: WorkSession) => (canEditSession ? canEditSession(session) : canWrite);
   const aria =
     labeled.length === 0
       ? "No hours logged yet"
@@ -95,12 +100,17 @@ export function WorkDayBar({
   }
 
   return (
-    <section className="rounded-md border border-line bg-surface p-4" data-testid="day-bar" aria-label="Hours worked">
+    <section className="rounded-md border border-line bg-surface p-4" data-testid="day-bar" data-source={freeText ? "local" : "server"} aria-label="Hours worked">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-baseline justify-between gap-2 text-sm">
-            <span className="font-medium">Hours worked</span>
-            <span className="tabular-nums text-muted">{total === 0 ? "0h" : clockSpan(total)}</span>
+            <span className="font-medium">
+              Hours worked
+              {dayLabel ? <span className="ml-2 font-normal text-muted">{dayLabel}</span> : null}
+            </span>
+            <span className="tabular-nums text-muted" data-testid="hours-total">
+              {total === 0 ? "0h" : clockSpan(total)}
+            </span>
           </div>
           <div className="relative h-9 rounded-md bg-raised" role="img" aria-label={aria}>
             {labeled.map((session) => (
@@ -148,14 +158,15 @@ export function WorkDayBar({
               <span className="font-medium">{session.projectName}</span>
               {session.notes ? <span className="text-muted">{session.notes}</span> : null}
               {session.userName ? <span className="text-muted">{session.userName}</span> : null}
-              {canWrite ? (
+              {editable(session) ? (
                 <span className="ml-auto flex gap-2">
-                  <button type="button" className="text-sm text-copper" onClick={() => begin(session)}>
+                  <button type="button" className="text-sm text-copper" data-testid="edit-session" onClick={() => begin(session)}>
                     Edit
                   </button>
                   <button
                     type="button"
                     className="text-sm text-muted"
+                    data-testid="remove-session"
                     onClick={() => {
                       void Promise.resolve(onDelete(session.id)).catch((cause: unknown) =>
                         setError(cause instanceof Error ? cause.message : "Couldn't remove that session."),

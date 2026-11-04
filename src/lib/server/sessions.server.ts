@@ -2,8 +2,8 @@
  * Work sessions (hours on a job). Own rows for anyone who logs a day; a lead can read the
  * crew's sessions; only an owner or admin can change someone else's. Nothing here is shared
  * outside the company, and a session never carries money.
- * The activity log no longer has an add button. These rows stay, and they are still what
- * paints the green hours on a signed-in daily report.
+ * The activity log edits today's hours through these functions when someone is signed in.
+ * A lead can read the crew and cannot change their rows. Labor and subs only touch their own.
  *
  * Relative imports so the PGLite tests can load this under node:test.
  * Every exported function takes an optional `sql`; the app passes none.
