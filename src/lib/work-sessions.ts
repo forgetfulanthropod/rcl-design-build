@@ -1,9 +1,10 @@
 /**
  * A work session is a block of hours on one job, inside a single calendar day.
  * Sessions are what paint the 24-hour bar and what the PDF caption letters (a, b, c…).
- * The activity log shows stored sessions and does not add new ones from the bar.
+ * The activity log edits these sessions: each letter is a job with a start and an end.
  * Pure: the activity log, the daily report, the PDF and the server all share these rules.
  */
+import { can } from "./permissions.ts";
 
 export const MAX_SESSION_NOTES = 500;
 export const MAX_SESSION_PROJECT = 120;
@@ -119,4 +120,24 @@ export function normalizeSession(input: SessionDraft): { ok: true; value: Sessio
   const projectName = input.projectName.trim().slice(0, MAX_SESSION_PROJECT);
   if (!projectName) return { ok: false, error: "Choose a project." };
   return { ok: true, value: { startMin, endMin, projectName, notes: input.notes.trim().slice(0, MAX_SESSION_NOTES) } };
+}
+
+/** Anyone who logs a day can add their own block. */
+export function mayAddSession(role: string): boolean {
+  return can(role, "session.write");
+}
+
+/** Leads and principals can see the crew's hours. Labor and subs cannot. */
+export function mayReviewSessions(role: string): boolean {
+  return can(role, "session.review");
+}
+
+/**
+ * Own hours follow session.write. Someone else's hours follow session.manage
+ * (owner, admin, superadmin). A lead can see the crew and cannot change their hours.
+ */
+export function mayEditSession(role: string, ownerId: string | undefined, actorId: string | undefined): boolean {
+  if (!ownerId || !actorId) return false;
+  if (ownerId === actorId) return can(role, "session.write");
+  return can(role, "session.manage");
 }

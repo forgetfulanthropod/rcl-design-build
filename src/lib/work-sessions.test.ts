@@ -4,6 +4,9 @@ import {
   clockFromMinutes,
   inputToMinutes,
   labelSessions,
+  mayAddSession,
+  mayEditSession,
+  mayReviewSessions,
   normalizeSession,
   sessionCaption,
   sessionCaptionRuns,
@@ -69,4 +72,28 @@ test("a session stays inside one day and needs a project; the bar uses its minut
   assert.equal(inputToMinutes("24:00"), 1440);
   assert.equal(inputToMinutes("24:01"), null);
   assert.equal(inputToMinutes("nope"), null);
+});
+
+test("hours editing: every role edits their own; only owner, admin and superadmin edit someone else's", () => {
+  for (const role of ["owner", "admin", "superadmin", "lead", "labor", "sub"] as const) {
+    assert.equal(mayAddSession(role), true, role);
+    assert.equal(mayEditSession(role, "me", "me"), true, `${role} own`);
+  }
+  for (const role of ["owner", "admin", "superadmin"] as const) {
+    assert.equal(mayReviewSessions(role), true, role);
+    assert.equal(mayEditSession(role, "them", "me"), true, `${role} other`);
+  }
+  assert.equal(mayReviewSessions("lead"), true);
+  assert.equal(mayEditSession("lead", "them", "me"), false);
+  for (const role of ["labor", "sub"] as const) {
+    assert.equal(mayReviewSessions(role), false, role);
+    assert.equal(mayEditSession(role, "them", "me"), false, role);
+  }
+  assert.equal(mayAddSession("hacker"), false);
+  assert.equal(mayEditSession("hacker", "me", "me"), false);
+  assert.equal(mayEditSession("subcontractor", "them", "me"), false);
+  assert.equal(mayEditSession("field", "me", "me"), true);
+  assert.equal(mayEditSession("field", "them", "me"), false);
+  assert.equal(mayEditSession("owner", undefined, "me"), false);
+  assert.equal(mayEditSession("owner", "them", undefined), false);
 });

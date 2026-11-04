@@ -47,7 +47,9 @@ test("activity log keeps the day bar, captions photos with the time on top, and 
   await expect(bar.getByRole("img")).toContainText("a");
   await expect(bar.getByRole("img")).toContainText("b");
   await expect(page.getByTestId("session-row").filter({ hasText: "Project A" })).toContainText("demolish fence");
-  await expect(page.getByTestId("add-session")).toHaveCount(0);
+  await expect(page.getByTestId("add-session")).toBeVisible();
+  await expect(page.getByText("Current project / client")).toHaveCount(0);
+  await expect(page.getByLabel("Day")).toHaveCount(0);
 
   const drop = page.getByTestId("photo-drop");
   await expect(drop).toBeVisible();
@@ -98,6 +100,50 @@ test("activity log keeps the day bar, captions photos with the time on top, and 
   expect(counted).toBeGreaterThan(fileTime);
   expect(text).toContain("(not camera)");
   expect(text).toContain("a  Project A demolish fence   b  Project B drywall takeoffs");
+});
+
+function hoursMinutes(label: string): number {
+  const h = /(\d+)h/.exec(label);
+  const m = /(\d+)m/.exec(label);
+  return (h ? Number(h[1]) : 0) * 60 + (m ? Number(m[1]) : 0);
+}
+
+test("activity log edits lettered hours: times, session b, delete, and the total", async ({ page }) => {
+  await page.goto("/tracking");
+  const total = page.getByTestId("hours-total");
+  await expect(total).toHaveText("6h 30m");
+  await expect(page.getByTestId("day-bar")).toContainText("sample");
+
+  const rowA = page.getByTestId("session-row").filter({ hasText: "Project A" });
+  await rowA.getByTestId("edit-session").click();
+  const edit = page.getByTestId("session-form");
+  await edit.locator("input[type=time]").nth(1).fill("12:00");
+  await edit.getByRole("button", { name: "Save session" }).click();
+  await expect(total).toHaveText("7h");
+  await expect(rowA).toContainText("12:00 PM");
+
+  await page.getByTestId("session-row").filter({ hasText: "drywall" }).getByTestId("remove-session").click();
+  await expect(page.getByTestId("session-row").filter({ hasText: "drywall" })).toHaveCount(0);
+  await expect(total).toHaveText("4h");
+  await expect(page.getByTestId("day-bar").getByRole("img")).not.toContainText("b");
+
+  await page.getByTestId("add-session").click();
+  const add = page.getByTestId("session-form");
+  await add.locator("input[type=time]").nth(0).fill("18:00");
+  await add.locator("input[type=time]").nth(1).fill("19:30");
+  await add.getByLabel("Project / job").fill("Project B");
+  await add.getByLabel("Notes").fill("set the posts");
+  await add.getByRole("button", { name: "Add to the day" }).click();
+  const rowB = page.getByTestId("session-row").filter({ hasText: "set the posts" });
+  await expect(rowB).toContainText("b");
+  await expect(rowB).toContainText("Project B");
+  await expect(rowB).toContainText("6:00 PM");
+  await expect(total).toHaveText("5h 30m");
+
+  await page.reload();
+  await expect(page.getByTestId("hours-total")).toHaveText("5h 30m");
+  await expect(page.getByTestId("session-row").filter({ hasText: "set the posts" })).toBeVisible();
+  await expect(page.getByTestId("session-row").filter({ hasText: "Project A" })).toContainText("12:00 PM");
 });
 
 test("work sessions: labor logs their own, cannot see the crew; a lead can view but not edit someone else's; an owner can", async ({ browser }) => {
@@ -231,6 +277,102 @@ test("private activity link follows document sending for every signed-in role", 
   } finally {
     const owner = opened.find((row) => row.role === "owner");
     if (owner) await call(owner.page, "setCompanySharing", { key: "labor_doc_send", value: false });
+    for (const session of opened) await session.ctx.close();
+  }
+});
+
+test("signed-in activity log: each role edits only the hours they are allowed to", async ({ browser }) => {
+  const labor = await as(browser, "labor");
+  const day = await labor.page.evaluate(() => new Date().toISOString().slice(0, 10));
+  const note = `labor hours ${Date.now()}`;
+  const subNote = `sub hours ${Date.now()}`;
+  const opened = [labor];
+  try {
+    await labor.page.goto("/tracking");
+    await expect(labor.page.getByText("sample day")).toBeVisible();
+    await labor.page.getByTestId("go-today").click();
+    await expect(labor.page).toHaveURL(new RegExp(`day=${day}`));
+    await expect(labor.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    const before = hoursMinutes(await labor.page.getByTestId("hours-total").innerText());
+    await labor.page.getByTestId("add-session").click();
+    const form = labor.page.getByTestId("session-form");
+    await form.locator("select").selectOption({ index: 1 });
+    await form.locator("input[type=time]").nth(0).fill("08:00");
+    await form.locator("input[type=time]").nth(1).fill("11:00");
+    await form.getByLabel("Notes").fill(note);
+    await form.getByRole("button", { name: "Add to the day" }).click();
+    await expect.poll(async () => hoursMinutes(await labor.page.getByTestId("hours-total").innerText())).toBe(before + 180);
+    await labor.page.getByTestId("session-row").filter({ hasText: note }).getByTestId("edit-session").click();
+    await labor.page.getByTestId("session-form").locator("input[type=time]").nth(1).fill("12:00");
+    await labor.page.getByTestId("session-form").getByRole("button", { name: "Save session" }).click();
+    await expect.poll(async () => hoursMinutes(await labor.page.getByTestId("hours-total").innerText())).toBe(before + 240);
+    await labor.page.reload();
+    await expect(labor.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    await expect(labor.page.getByTestId("session-row").filter({ hasText: note })).toContainText("12:00 PM", { timeout: 30_000 });
+
+    const crew = await call(labor.page, "listWorkSessions", { day, scope: "company" });
+    expect(crew.ok).toBe(false);
+    expect(crew.error).toMatch(/can't do that \(session\.review\)/);
+    const mine = (await call(labor.page, "listWorkSessions", { day, scope: "mine" })).value as { id: string; notes: string; projectId: string }[];
+    const created = mine.find((row) => row.notes === note);
+    expect(created).toBeTruthy();
+
+    const lead = await as(browser, "lead");
+    opened.push(lead);
+    await lead.page.goto(`/tracking?day=${day}`);
+    await expect(lead.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    const leadRow = lead.page.getByTestId("session-row").filter({ hasText: note });
+    await expect(leadRow).toBeVisible({ timeout: 30_000 });
+    await expect(leadRow.getByTestId("edit-session")).toHaveCount(0);
+    const leadEdit = await call(lead.page, "updateWorkSession", {
+      id: created!.id,
+      day,
+      projectId: created!.projectId,
+      startMin: 8 * 60,
+      endMin: 13 * 60,
+      notes: "changed by lead",
+    });
+    expect(leadEdit.ok).toBe(false);
+    expect(leadEdit.error).toMatch(/can't do that \(session\.manage\)/);
+
+    const sub = await as(browser, "subcontractor");
+    opened.push(sub);
+    await sub.page.goto(`/tracking?day=${day}`);
+    await expect(sub.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    await expect(sub.page.getByText(note)).toHaveCount(0);
+    expect((await call(sub.page, "listWorkSessions", { day, scope: "company" })).ok).toBe(false);
+    await sub.page.getByTestId("add-session").click();
+    const subForm = sub.page.getByTestId("session-form");
+    await subForm.locator("select").selectOption({ index: 1 });
+    await subForm.locator("input[type=time]").nth(0).fill("13:00");
+    await subForm.locator("input[type=time]").nth(1).fill("15:00");
+    await subForm.getByLabel("Notes").fill(subNote);
+    await subForm.getByRole("button", { name: "Add to the day" }).click();
+    await expect(sub.page.getByTestId("session-row").filter({ hasText: subNote }).getByTestId("edit-session")).toBeVisible();
+
+    const admin = await as(browser, "admin");
+    opened.push(admin);
+    await admin.page.goto(`/tracking?day=${day}`);
+    await expect(admin.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    await expect(admin.page.getByTestId("session-row").filter({ hasText: note }).getByTestId("edit-session")).toBeVisible({ timeout: 30_000 });
+
+    const owner = await as(browser, "owner");
+    opened.push(owner);
+    await owner.page.goto(`/tracking?day=${day}`);
+    await expect(owner.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    const ownerRow = owner.page.getByTestId("session-row").filter({ hasText: note });
+    await expect(ownerRow.getByTestId("edit-session")).toBeVisible({ timeout: 30_000 });
+    await ownerRow.getByTestId("edit-session").click();
+    await owner.page.getByTestId("session-form").getByLabel("Notes").fill("owner fixed");
+    await owner.page.getByTestId("session-form").getByRole("button", { name: "Save session" }).click();
+    await owner.page.reload();
+    await expect(owner.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
+    await expect(owner.page.getByTestId("session-row").filter({ hasText: "owner fixed" })).toBeVisible({ timeout: 30_000 });
+    await owner.page.getByTestId("session-row").filter({ hasText: "owner fixed" }).getByTestId("remove-session").click();
+    await owner.page.getByTestId("session-row").filter({ hasText: subNote }).getByTestId("remove-session").click();
+    await expect(owner.page.getByText("owner fixed")).toHaveCount(0);
+    await expect(owner.page.getByText(subNote)).toHaveCount(0);
+  } finally {
     for (const session of opened) await session.ctx.close();
   }
 });
