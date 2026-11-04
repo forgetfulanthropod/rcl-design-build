@@ -1,10 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useRef, useMemo } from "react";
-import { PdfDoc } from "@/lib/pdf";
-import { drawSessionCaption } from "@/lib/session-caption";
+import { useEffect, useState, useMemo } from "react";
 import { photoClockLabel } from "@/lib/report-entries";
 import { preparePhoto } from "@/lib/photo-prepare";
 import { WorkDayBar } from "@/components/work-day-bar";
+import { PhotoDrop } from "@/components/photo-drop";
+import { DayExport } from "@/components/day-export";
+import { buildActivityPdf, type ActivityPdfItem } from "@/lib/activity-pdf";
+import { photoCaptionHeading } from "@/lib/photo-caption";
+import { MAX_CAPTION } from "@/lib/activity-share";
+import { createActivityShare, getMyActivityShare, revokeActivityShare } from "@/lib/server/fns";
 import type { PhotoTimeSource } from "@/lib/photo-upload";
 import type { WorkSession } from "@/lib/work-sessions";
 
@@ -102,8 +106,11 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
       id: "s1p",
       ts: `${SAMPLE_DAY}T08:40:00.000Z`,
       kind: "photo",
+      body: "Rotten posts at the alley line.",
       dataUrl: swatch("Project A · fence", "#3d4a3a"),
       project: "Project A",
+      takenAt: `${SAMPLE_DAY}T08:41:00.000Z`,
+      takenSource: "exif",
     },
     {
       id: "s2",
@@ -123,8 +130,11 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
       id: "s3p",
       ts: `${SAMPLE_DAY}T10:22:00.000Z`,
       kind: "photo",
+      body: "Counted sheets. One box in the garage is damaged.",
       dataUrl: swatch("Project B · drywall", "#3a3328"),
       project: "Project B",
+      takenAt: `${SAMPLE_DAY}T10:22:00.000Z`,
+      takenSource: "file",
     },
     {
       id: "s4",
@@ -156,6 +166,42 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
     },
   ];
   const next = { ...log, [SAMPLE_DAY]: sample };
+  saveLog(next);
+  return next;
+}
+
+const SAMPLE_PHOTO: Record<string, Pick<Entry, "body" | "takenAt" | "takenSource">> = {
+  s1p: {
+    body: "Rotten posts at the alley line.",
+    takenAt: `${SAMPLE_DAY}T08:41:00.000Z`,
+    takenSource: "exif",
+  },
+  s3p: {
+    body: "Counted sheets. One box in the garage is damaged.",
+    takenAt: `${SAMPLE_DAY}T10:22:00.000Z`,
+    takenSource: "file",
+  },
+};
+
+/** Fill caption and clock on the sample photos when an older copy of the sample is already stored. */
+function applySampleCaptions(log: DayLog): DayLog {
+  const day = log[SAMPLE_DAY];
+  if (!day) return log;
+  let changed = false;
+  const nextDay = day.map((entry) => {
+    const sample = SAMPLE_PHOTO[entry.id];
+    if (!sample) return entry;
+    if (entry.body && entry.takenSource) return entry;
+    changed = true;
+    return {
+      ...entry,
+      body: entry.body || sample.body,
+      takenAt: entry.takenAt ?? sample.takenAt,
+      takenSource: entry.takenSource ?? sample.takenSource,
+    };
+  });
+  if (!changed) return log;
+  const next = { ...log, [SAMPLE_DAY]: nextDay };
   saveLog(next);
   return next;
 }
@@ -226,55 +272,6 @@ async function dataUrlToJpeg(dataUrl: string): Promise<Uint8Array | null> {
   }
 }
 
-function buildDayPdf(
-  day: string,
-  entries: Entry[],
-  jpegs: Map<string, Uint8Array | null>,
-  projectTimes: { project: string; minutes: number }[],
-  sessions: WorkSession[],
-): Uint8Array {
-  const doc = new PdfDoc();
-  doc.paragraph("Activity log", 22, { bold: true, leading: 28 });
-  doc.gap(4);
-  doc.paragraph(`Day: ${new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: "numeric" })}`, 12);
-  doc.paragraph(`Entries: ${entries.length}`, 11, { gray: 0.4 });
-  doc.rule();
-  if (entries.length === 0) doc.paragraph("Nothing logged yet.", 11, { gray: 0.35 });
-  for (const e of entries) {
-    doc.gap(8);
-    const loc = e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
-    const label = e.kind === "photo" ? "Photo" : e.kind === "project" ? "Project" : e.kind === "lunch" ? "Lunch" : "Note";
-    doc.ensure(20);
-    doc.paragraph(`${photoWhen(e)}${loc} · ${label}`, 9.5, { bold: true, gray: 0.4 });
-    if (e.body) doc.paragraph(e.body, 11.5);
-    if (e.project) doc.paragraph(`Project: ${e.project}`, 11);
-    if (e.kind === "photo") {
-      const jpeg = jpegs.get(e.id);
-      if (jpeg && doc.jpeg(jpeg)) {
-        // embedded
-      } else {
-        doc.paragraph("(Photo could not be included.)", 11, { gray: 0.35 });
-      }
-    }
-  }
-  drawSessionCaption(doc, sessions);
-  if (projectTimes.length > 0) {
-    doc.gap(12);
-    doc.rule();
-    doc.paragraph("Project time", 14, { bold: true });
-    let total = 0;
-    for (const pt of projectTimes) {
-      doc.paragraph(`${pt.project}: ${formatMinutes(pt.minutes)}`, 11);
-      total += pt.minutes;
-    }
-    doc.paragraph(`Total: ${formatMinutes(total)}`, 12, { bold: true });
-  }
-  return doc.render({
-    title: `Activity log · ${day}`,
-    footer: (page, total) => `Activity log · ${day} · Page ${page} of ${total}`,
-  });
-}
-
 export const Route = createFileRoute("/tracking")({
   component: TrackingPage,
 });
@@ -286,12 +283,36 @@ function TrackingPage() {
   const [sessions, setSessions] = useState<SessionLog>({});
   const [project, setProject] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [canFileShare, setCanFileShare] = useState(false);
+  const [linkToken, setLinkToken] = useState("");
+  const [shareNote, setShareNote] = useState("");
+  const [shareError, setShareError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [shareCheckedDay, setShareCheckedDay] = useState("");
 
   useEffect(() => {
-    const loaded = seedSampleIfEmpty(loadLog());
+    try {
+      const file = new File([new Blob(["%PDF"])], "day.pdf", { type: "application/pdf" });
+      setCanFileShare(typeof navigator.share === "function" && Boolean(navigator.canShare?.({ files: [file] })));
+    } catch {
+      setCanFileShare(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    setLinkToken("");
+    setShareCheckedDay("");
+    setCopied(false);
+    setShareNote("");
+    setShareError("");
+  }, [day]);
+
+  useEffect(() => {
+    const loaded = applySampleCaptions(seedSampleIfEmpty(loadLog()));
     setLog(loaded);
     setTimes(loadTimes());
     const stored = loadSessions();
@@ -389,28 +410,44 @@ function TrackingPage() {
     setMenuOpen(false);
   }
 
-  function addPhoto(file: File) {
-    setBusy(true);
+  async function addPhotos(files: File[]) {
+    setPhotoBusy(true);
     setPhotoError("");
-    setMenuOpen(false);
-    void preparePhoto(file)
-      .then((photo) => {
-        void addEntry({
+    const added: Entry[] = [];
+    const errors: string[] = [];
+    for (const file of files) {
+      try {
+        const photo = await preparePhoto(file);
+        added.push({
+          id: crypto.randomUUID(),
+          ts: new Date().toISOString(),
           kind: "photo",
+          body: "",
           dataUrl: photo.image,
+          project: project || undefined,
           takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
           takenSource: photo.takenSource,
         });
-      })
-      .catch((cause: unknown) => {
-        setPhotoError(cause instanceof Error ? cause.message : "Couldn't read that photo.");
-      })
-      .finally(() => setBusy(false));
+      } catch (cause) {
+        errors.push(cause instanceof Error ? cause.message : "Couldn't read that photo.");
+      }
+    }
+    if (added.length) {
+      const next = { ...log, [day]: [...(log[day] ?? []), ...added] };
+      setLog(next);
+      saveLog(next);
+    }
+    setPhotoError(errors[0] ?? "");
+    setPhotoBusy(false);
   }
 
-  function writeSessions(next: SessionLog) {
-    setSessions(next);
-    saveSessions(next);
+  function setCaption(id: string, body: string) {
+    const next = {
+      ...log,
+      [day]: (log[day] ?? []).map((entry) => (entry.id === id ? { ...entry, body: body.slice(0, MAX_CAPTION) } : entry)),
+    };
+    setLog(next);
+    saveLog(next);
   }
 
   function setProjectMinutes(proj: string, minutes: number) {
@@ -428,39 +465,163 @@ function TrackingPage() {
     }
   }
 
-  async function shareDay() {
-    setBusy(true);
-    try {
-      const jpegs = new Map<string, Uint8Array | null>();
-      for (const e of entries) {
-        if (e.kind === "photo" && e.dataUrl) {
-          jpegs.set(e.id, await dataUrlToJpeg(e.dataUrl));
-        }
+  async function makePdf(): Promise<{ blob: Blob; name: string }> {
+    const jpegs = new Map<string, Uint8Array | null>();
+    for (const e of entries) {
+      if (e.kind === "photo" && e.dataUrl) jpegs.set(e.id, await dataUrlToJpeg(e.dataUrl));
+    }
+    const items: ActivityPdfItem[] = entries.map((e) => {
+      if (e.kind === "photo") {
+        return {
+          kind: "photo",
+          captionTime: photoCaptionHeading({ takenAt: e.takenAt, takenSource: e.takenSource }, clock),
+          caption: e.body ?? "",
+          project: e.project,
+          jpeg: jpegs.get(e.id) ?? null,
+        };
       }
-      const pdf = buildDayPdf(day, entries, jpegs, displayTimes, daySessions);
-      const blob = new Blob([pdf as BlobPart], { type: "application/pdf" });
-      const file = new File([blob], `tracking-${day}.pdf`, { type: "application/pdf" });
+      const loc = e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
+      const label = e.kind === "project" ? "Project" : e.kind === "lunch" ? "Lunch" : "Note";
+      return { kind: e.kind, stamp: `${clock(e.ts)}${loc} · ${label}`, body: e.body ?? "", project: e.project };
+    });
+    const pdf = buildActivityPdf({
+      dayKey: day,
+      dayLabel: new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: "numeric" }),
+      items,
+      sessions: daySessions,
+      projectTimes: displayTimes.map((pt) => ({ project: pt.project, label: formatMinutes(pt.minutes) })),
+      totalLabel: formatMinutes(totalMinutes),
+    });
+    return { blob: new Blob([pdf as BlobPart], { type: "application/pdf" }), name: `tracking-${day}.pdf` };
+  }
 
+  function savePdf(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+
+  async function downloadDay() {
+    setExportBusy(true);
+    setShareError("");
+    try {
+      const { blob, name } = await makePdf();
+      savePdf(blob, name);
+    } catch (cause) {
+      setShareError(cause instanceof Error ? cause.message : "Couldn't make the PDF.");
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function shareFile() {
+    setExportBusy(true);
+    setShareError("");
+    try {
+      const { blob, name } = await makePdf();
+      const file = new File([blob], name, { type: "application/pdf" });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          title: `Activity log ${day}`,
-          text: `Activity log for ${day}`,
-          files: [file],
-        });
+        await navigator.share({ title: `Activity log ${day}`, files: [file] });
         return;
       }
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `tracking-${day}.pdf`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-
-      const mailto = `mailto:?subject=${encodeURIComponent(`Activity log ${day}`)}&body=${encodeURIComponent(`Activity log for ${day} is attached (downloaded as tracking-${day}.pdf).`)}`;
-      window.open(mailto, "_blank");
+      savePdf(blob, name);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
+      setShareError(cause instanceof Error ? cause.message : "Couldn't share the PDF.");
     } finally {
-      setBusy(false);
+      setExportBusy(false);
+    }
+  }
+
+  function shareFailure(cause: unknown): string {
+    const message = cause instanceof Error ? cause.message : "";
+    if (/unauthorized/i.test(message)) return "";
+    if (/doc\.send/.test(message)) {
+      return "A private link follows document sending. Owners, admins, and leads can create one. Labor can when Labor can send documents is on. Subs cannot.";
+    }
+    return message || "Couldn't create a link.";
+  }
+
+  async function openShare() {
+    setShareOpen((open) => !open);
+    setShareError("");
+    if (shareOpen || shareCheckedDay === day) return;
+    setShareCheckedDay(day);
+    try {
+      const mine = await getMyActivityShare({ data: { day } });
+      if (mine?.token) setLinkToken(mine.token);
+    } catch (cause) {
+      const message = shareFailure(cause);
+      if (!message) setShareNote("Sign in to create a private link. Download saves the PDF on this device.");
+      else setShareError(message);
+    }
+  }
+
+  function snapshot() {
+    return {
+      day,
+      entries: entries.map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        body: e.body ?? "",
+        image: e.kind === "photo" ? (e.dataUrl ?? "") : "",
+        takenAt: e.takenAt ?? null,
+        takenSource: e.takenSource ?? null,
+        project: e.project ?? "",
+        ts: e.ts,
+      })),
+      sessions: daySessions.map((session) => ({
+        id: session.id,
+        startMin: session.startMin,
+        endMin: session.endMin,
+        project: session.projectName,
+        notes: session.notes,
+      })),
+    };
+  }
+
+  async function createLink() {
+    setExportBusy(true);
+    setShareError("");
+    setShareNote("");
+    try {
+      const created = await createActivityShare({ data: snapshot() });
+      setLinkToken(created.token);
+      setShareCheckedDay(day);
+    } catch (cause) {
+      const message = shareFailure(cause);
+      if (!message) setShareNote("Sign in to create a private link. Download saves the PDF on this device.");
+      else setShareError(message);
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function copyLink() {
+    const url = `${window.location.origin}/share/${linkToken}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      setShareError("Select the link and copy it.");
+    }
+  }
+
+  async function removeLink() {
+    if (!linkToken) return;
+    setExportBusy(true);
+    setShareError("");
+    try {
+      await revokeActivityShare({ data: { token: linkToken } });
+      setLinkToken("");
+      setCopied(false);
+    } catch (cause) {
+      setShareError(cause instanceof Error ? cause.message : "Couldn't remove the link.");
+    } finally {
+      setExportBusy(false);
     }
   }
 
@@ -508,31 +669,14 @@ function TrackingPage() {
 
       {isSample && (
         <div className="mb-4 rounded border border-dashed border-green-600/40 bg-green-600/5 p-3 text-sm">
-          This is a sample day. Green on the bar is hours from work sessions. Tap + Today to start your own day.
+          This is a sample day. Green on the bar is hours already saved. Drop photos below and write a caption under each one.
         </div>
       )}
 
-      <WorkDayBar
-        sessions={daySessions}
-        projects={projectChoices}
-        freeText
-        canWrite
-        onSave={(input) => {
-          const row: StoredSession = {
-            id: input.id ?? crypto.randomUUID(),
-            startMin: input.startMin,
-            endMin: input.endMin,
-            project: input.projectName,
-            notes: input.notes,
-          };
-          const list = sessions[day] ?? [];
-          const next = { ...sessions, [day]: input.id ? list.map((item) => (item.id === input.id ? row : item)) : [...list, row] };
-          writeSessions(next);
-        }}
-        onDelete={(id) => {
-          writeSessions({ ...sessions, [day]: (sessions[day] ?? []).filter((item) => item.id !== id) });
-        }}
-      />
+      <WorkDayBar sessions={daySessions} projects={projectChoices} freeText canWrite={false} onSave={() => {}} onDelete={() => {}} />
+      <div className="mt-4">
+        <PhotoDrop busy={photoBusy} onFiles={(files) => void addPhotos(files)} />
+      </div>
       {photoError ? (
         <p className="mt-3 text-sm text-danger" role="alert">
           {photoError}
@@ -569,22 +713,38 @@ function TrackingPage() {
 
       <div className="mb-6 space-y-3">
         {entries.length === 0 ? (
-          <p className="text-muted">No entries for this day yet. Use the green button to log something.</p>
+          <p className="text-muted">No entries for this day yet. Drop photos above, or use the green button for a note or lunch.</p>
         ) : (
-          entries.map((e) => (
-            <div key={e.id} className="rounded border border-line bg-raised p-3">
-              <div className="mb-1 text-xs text-muted">
-                {photoWhen(e)}
-                {e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}` : ""}
-                {e.project ? ` · ${e.project}` : ""}
-              </div>
-              {e.kind === "text" || e.kind === "project" || e.kind === "lunch" ? (
+          entries.map((e) =>
+            e.kind === "photo" ? (
+              <figure key={e.id} className="rounded border border-line bg-raised p-3" data-testid="photo-caption">
+                {e.project ? <p className="mb-1 text-xs text-muted">{e.project}</p> : null}
+                {e.dataUrl ? <img src={e.dataUrl} alt="" className="max-h-48 rounded" /> : null}
+                <figcaption className="mt-2">
+                  <p className="text-sm font-medium tabular-nums" data-testid="photo-caption-time">
+                    {photoCaptionHeading({ takenAt: e.takenAt, takenSource: e.takenSource }, clock) || "Time not recorded"}
+                  </p>
+                  <textarea
+                    className="field mt-1"
+                    maxLength={MAX_CAPTION}
+                    placeholder="Add a caption"
+                    aria-label="Caption"
+                    value={e.body ?? ""}
+                    onChange={(event) => setCaption(e.id, event.target.value)}
+                  />
+                </figcaption>
+              </figure>
+            ) : (
+              <div key={e.id} className="rounded border border-line bg-raised p-3">
+                <div className="mb-1 text-xs text-muted">
+                  {photoWhen(e)}
+                  {e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}` : ""}
+                  {e.project ? ` · ${e.project}` : ""}
+                </div>
                 <p className="whitespace-pre-wrap">{e.body}</p>
-              ) : e.dataUrl ? (
-                <img src={e.dataUrl} alt="Entry" className="max-h-48 rounded" />
-              ) : null}
-            </div>
-          ))
+              </div>
+            ),
+          )
         )}
       </div>
 
@@ -615,25 +775,24 @@ function TrackingPage() {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={shareDay}
-        disabled={busy}
-        className="w-full rounded border border-line bg-raised px-4 py-3 text-base font-medium disabled:opacity-60"
-      >
-        {busy ? "Preparing…" : "Share day as PDF (email)"}
-      </button>
+      <DayExport
+        busy={exportBusy}
+        shareOpen={shareOpen}
+        canFileShare={canFileShare}
+        linkUrl={linkToken ? `${typeof window === "undefined" ? "" : window.location.origin}/share/${linkToken}` : ""}
+        note={shareNote}
+        error={shareError}
+        copied={copied}
+        onDownload={() => void downloadDay()}
+        onToggleShare={() => void openShare()}
+        onShareFile={() => void shareFile()}
+        onCreateLink={() => void createLink()}
+        onCopy={() => void copyLink()}
+        onRevoke={() => void removeLink()}
+      />
 
       {menuOpen && (
         <div className="fixed bottom-28 right-6 z-40 flex w-56 flex-col gap-1 rounded-xl border border-line bg-raised p-2 shadow-lg">
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className="flex items-center gap-3 rounded-lg px-4 py-3 text-left text-sm hover:bg-surface"
-          >
-            <span className="text-xl">📷</span>
-            <span>Photo</span>
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -667,18 +826,6 @@ function TrackingPage() {
           {menuOpen ? "✕" : "🕒"}
         </button>
       </div>
-
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*,.heic,.heif"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) addPhoto(f);
-          e.target.value = "";
-        }}
-      />
     </main>
   );
 }

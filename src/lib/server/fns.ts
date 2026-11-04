@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { isDocKind } from "@/lib/documents";
 import { authMiddleware } from "@/lib/auth/middleware";
+import { sanitizeActivityShare } from "@/lib/activity-share";
 
 function required(value: unknown, max: number, label: string): string {
   if (typeof value !== "string") throw new Error(`${label} is required.`);
@@ -1027,4 +1028,47 @@ export const getYoureOn = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { getYoureOn: run } = await import("./crew.server");
     return run(context.userId);
+  });
+
+function shareToken(value: unknown): string {
+  const token = required(value, 80, "Link");
+  if (!/^[A-Za-z0-9_-]{20,80}$/.test(token)) throw new Error("This link is not available.");
+  return token;
+}
+
+export const createActivityShare = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: unknown) => {
+    const parsed = sanitizeActivityShare(input);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.value;
+  })
+  .handler(async ({ context, data }) => {
+    const { createActivityShare: run } = await import("./activity-share.server");
+    return run(context.userId, data);
+  });
+
+export const getMyActivityShare = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day?: string }) => ({ day: dayArg(input?.day) }))
+  .handler(async ({ context, data }) => {
+    const { myActivityShare } = await import("./activity-share.server");
+    return myActivityShare(context.userId, data.day);
+  });
+
+export const revokeActivityShare = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { token?: string }) => ({ token: shareToken(input?.token) }))
+  .handler(async ({ context, data }) => {
+    const { revokeActivityShare: run } = await import("./activity-share.server");
+    return run(context.userId, data.token);
+  });
+
+/** Public: the token is the secret. A missing or revoked link is the same answer. */
+export const getActivityShare = createServerFn({ method: "GET" })
+  .validator((token: string) => shareToken(token))
+  .handler(async ({ data }) => {
+    const { readActivityShare, SHARE_UNAVAILABLE } = await import("./activity-share.server");
+    const share = await readActivityShare(data);
+    return share ? { ok: true as const, share } : { ok: false as const, error: SHARE_UNAVAILABLE };
   });

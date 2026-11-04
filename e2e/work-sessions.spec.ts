@@ -4,8 +4,9 @@ import { extractPdfText } from "../src/lib/pdf";
 
 const SHOTS = "/opt/cursor/artifacts/screenshots";
 
-// Activity log (no sign-in): the 24-hour bar, adding a session, and the PDF caption.
+// Activity log (no sign-in): the 24-hour bar stays, photos get captions, export offers download and share.
 // Daily-report sessions: who may create, view and edit, per role.
+// Private links: who may create one, per role.
 const LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", lead: "Lead", labor: "Labor", subcontractor: "Subcontractor" };
 
 async function as(browser: Browser, role: string) {
@@ -38,7 +39,7 @@ const today = (page: Page) =>
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   });
 
-test("activity log shows the day bar, adds a session, and the PDF captions it", async ({ page }) => {
+test("activity log keeps the day bar, captions photos with the time on top, and offers download and share", async ({ page }) => {
   await page.goto("/tracking");
   await expect(page.getByRole("heading", { name: "Activity log" })).toBeVisible();
   const bar = page.getByTestId("day-bar");
@@ -46,35 +47,57 @@ test("activity log shows the day bar, adds a session, and the PDF captions it", 
   await expect(bar.getByRole("img")).toContainText("a");
   await expect(bar.getByRole("img")).toContainText("b");
   await expect(page.getByTestId("session-row").filter({ hasText: "Project A" })).toContainText("demolish fence");
+  await expect(page.getByTestId("add-session")).toHaveCount(0);
 
-  await page.getByTestId("add-session").click();
-  const form = page.getByTestId("session-form");
-  await expect(form).toBeVisible();
-  await form.locator("input[type=time]").nth(0).fill("18:00");
-  await form.locator("input[type=time]").nth(1).fill("19:30");
-  await form.getByLabel("Project / job").fill("Project C");
-  await form.getByLabel("Notes").fill("set the posts");
+  const drop = page.getByTestId("photo-drop");
+  await expect(drop).toBeVisible();
+  const picker = drop.getByTestId("photo-input");
+  await expect(picker).toHaveJSProperty("multiple", true);
+  await expect(picker).toHaveAttribute("accept", /heic/);
+
+  const camera = page.getByTestId("photo-caption").nth(0);
+  const cameraTime = camera.getByTestId("photo-caption-time");
+  await expect(cameraTime).toBeVisible();
+  await expect(cameraTime).not.toContainText("not camera");
+  await expect(camera.getByRole("textbox", { name: "Caption" })).toHaveValue(/Rotten posts/);
+  const timeBox = await cameraTime.boundingBox();
+  const fieldBox = await camera.getByRole("textbox", { name: "Caption" }).boundingBox();
+  expect(timeBox && fieldBox && timeBox.y < fieldBox.y).toBe(true);
+
+  const fileCap = page.getByTestId("photo-caption").nth(1);
+  await expect(fileCap.getByTestId("photo-caption-time")).toContainText("file time");
+  await expect(fileCap.getByTestId("photo-caption-time")).toContainText("(not camera)");
+  await expect(fileCap.getByRole("textbox", { name: "Caption" })).toHaveValue(/Counted sheets/);
+
   mkdirSync(SHOTS, { recursive: true });
-  await page.screenshot({ path: `${SHOTS}/activity-log-bar-and-session.png`, fullPage: true });
-  await form.getByRole("button", { name: "Add to the day" }).click();
-  await expect(page.getByTestId("session-row").filter({ hasText: "Project C" })).toContainText("set the posts");
-  await expect(bar.getByRole("img")).toContainText("c");
+  await drop.screenshot({ path: `${SHOTS}/photo-drop.png` });
+  await camera.screenshot({ path: `${SHOTS}/photo-caption-time.png` });
+
+  await page.getByTestId("day-export").scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Share", exact: true }).click();
+  await expect(page.getByTestId("share-options")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+  await expect(page.getByTestId("create-share-link")).toBeVisible();
+  await page.getByTestId("day-export").screenshot({ path: `${SHOTS}/share-download.png` });
+
+  await picker.setInputFiles("e2e/fixtures/site-photo.jpg");
+  await expect(page.getByTestId("photo-caption")).toHaveCount(3);
+  await camera.getByRole("textbox", { name: "Caption" }).fill("Posts were rotten at the base.");
 
   const downloading = page.waitForEvent("download");
-  await page.getByRole("button", { name: /Share day as PDF/ }).click();
+  await page.getByRole("button", { name: "Download PDF" }).click();
   const download = await downloading;
   const saved = `${SHOTS}/activity-log.pdf`;
   await download.saveAs(saved);
   const text = extractPdfText(new Uint8Array(readFileSync(saved))).join("");
+  const rotten = text.indexOf("Posts were rotten at the base.");
+  const fileTime = text.indexOf("file time");
+  const counted = text.indexOf("Counted sheets");
+  expect(rotten).toBeGreaterThanOrEqual(0);
+  expect(fileTime).toBeGreaterThan(rotten);
+  expect(counted).toBeGreaterThan(fileTime);
+  expect(text).toContain("(not camera)");
   expect(text).toContain("a  Project A demolish fence   b  Project B drywall takeoffs");
-  expect(text).toContain("Project C");
-  expect(text).toContain("set the posts");
-
-  const pdf = await page.context().newPage();
-  await pdf.goto(`file://${saved}`);
-  await pdf.waitForTimeout(800);
-  await pdf.screenshot({ path: `${SHOTS}/activity-log-pdf-caption.png`, fullPage: true });
-  await pdf.close();
 });
 
 test("work sessions: labor logs their own, cannot see the crew; a lead can view but not edit someone else's; an owner can", async ({ browser }) => {
@@ -117,4 +140,97 @@ test("work sessions: labor logs their own, cannot see the crew; a lead can view 
   await sub.ctx.close();
   await lead.ctx.close();
   await labor.ctx.close();
+});
+
+test("private activity link follows document sending for every signed-in role", async ({ browser }) => {
+  const image = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"/>')}`;
+  const snap = (note: string) => ({
+    day: "2026-11-04",
+    entries: [
+      {
+        id: "p1",
+        kind: "photo",
+        body: note,
+        image,
+        takenAt: "2026-11-02T08:41:00.000Z",
+        takenSource: "exif",
+        project: "Project A",
+        ts: "2026-11-02T08:40:00.000Z",
+        lat: 38.04,
+        lng: -84.5,
+      },
+    ],
+    sessions: [],
+  });
+
+  const opened: { ctx: Awaited<ReturnType<typeof as>>["ctx"]; page: Page; role: string }[] = [];
+  const open = async (role: string) => {
+    const session = await as(browser, role);
+    opened.push({ ...session, role });
+    return session;
+  };
+
+  try {
+    const labor = await open("labor");
+    const laborDenied = await call(labor.page, "createActivityShare", snap("labor"));
+    expect(laborDenied.ok).toBe(false);
+    expect(laborDenied.error).toMatch(/can't do that \(doc\.send\)/);
+
+    const sub = await open("subcontractor");
+    const subDenied = await call(sub.page, "createActivityShare", snap("sub"));
+    expect(subDenied.ok).toBe(false);
+    expect(subDenied.error).toMatch(/can't do that \(doc\.send\)/);
+
+    const tokens = new Map<string, string>();
+    for (const role of ["lead", "admin", "owner"] as const) {
+      const who = await open(role);
+      const created = await call(who.page, "createActivityShare", snap(`${role} caption`));
+      expect(created.ok, `${role} ${created.error}`).toBe(true);
+      const token = (created.value as { token: string }).token;
+      tokens.set(role, token);
+      const read = await call(who.page, "getActivityShare", token);
+      expect(read.ok, read.error).toBe(true);
+      const body = read.value as { share: { entries: { body: string }[] } };
+      expect(body.share.entries[0].body).toBe(`${role} caption`);
+      expect(JSON.stringify(read.value)).not.toContain("38.04");
+      expect(JSON.stringify(read.value)).not.toContain("lat");
+    }
+
+    const viewer = await browser.newPage();
+    await viewer.goto(`/share/${tokens.get("owner")}`);
+    await expect(viewer.getByTestId("photo-caption-time")).toBeVisible();
+    await expect(viewer.getByText("owner caption")).toBeVisible();
+    await viewer.close();
+
+    const owner = opened.find((row) => row.role === "owner")!;
+    const lead = opened.find((row) => row.role === "lead")!;
+    await call(owner.page, "setCompanySharing", { key: "labor_doc_send", value: true });
+    const laborOk = await call(labor.page, "createActivityShare", snap("labor caption"));
+    expect(laborOk.ok, laborOk.error).toBe(true);
+    const laborToken = (laborOk.value as { token: string }).token;
+    const subStill = await call(sub.page, "createActivityShare", snap("sub still"));
+    expect(subStill.ok).toBe(false);
+    expect(subStill.error).toMatch(/can't do that \(doc\.send\)/);
+
+    const leadRevoke = await call(lead.page, "revokeActivityShare", { token: laborToken });
+    expect(leadRevoke.ok).toBe(false);
+    expect(leadRevoke.error).toMatch(/can't do that \(report\.review\)/);
+
+    await call(owner.page, "setCompanySharing", { key: "labor_doc_send", value: false });
+    const laborAgain = await call(labor.page, "createActivityShare", snap("labor again"));
+    expect(laborAgain.ok).toBe(false);
+    expect(laborAgain.error).toMatch(/can't do that \(doc\.send\)/);
+    expect((await call(owner.page, "revokeActivityShare", { token: laborToken })).ok).toBe(true);
+    for (const token of tokens.values()) {
+      expect((await call(owner.page, "revokeActivityShare", { token })).ok).toBe(true);
+    }
+    const check = await browser.newPage();
+    await check.goto(`/share/${tokens.get("owner")}`);
+    await expect(check.getByText("This link is not available.")).toBeVisible();
+    await check.close();
+  } finally {
+    const owner = opened.find((row) => row.role === "owner");
+    if (owner) await call(owner.page, "setCompanySharing", { key: "labor_doc_send", value: false });
+    for (const session of opened) await session.ctx.close();
+  }
 });

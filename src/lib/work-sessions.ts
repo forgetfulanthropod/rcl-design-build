@@ -1,6 +1,7 @@
 /**
  * A work session is a block of hours on one job, inside a single calendar day.
  * Sessions are what paint the 24-hour bar and what the PDF caption letters (a, b, c…).
+ * The activity log shows stored sessions and does not add new ones from the bar.
  * Pure: the activity log, the daily report, the PDF and the server all share these rules.
  */
 

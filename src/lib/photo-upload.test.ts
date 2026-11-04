@@ -10,6 +10,7 @@ import {
   exifTakenAt,
   firstThatFits,
   isHeic,
+  isPhotoFile,
   plausibleTakenAt,
   resolvePhotoClock,
   splitPhotoClock,
@@ -177,6 +178,14 @@ test("a stored taken-at must be plausible: not before 2000, not more than a day 
   assert.equal(plausibleTakenAt("2026-10-22T12:00:00Z", now), null);
   assert.equal(plausibleTakenAt("not a date", now), null);
   assert.equal(plausibleTakenAt(null, now), null);
+});
+
+test("the photo drop accepts images and HEIC names, and skips other files", () => {
+  assert.equal(isPhotoFile({ type: "image/jpeg", name: "a.jpg" }), true);
+  assert.equal(isPhotoFile({ type: "", name: "IMG_2044.HEIC" }), true);
+  assert.equal(isPhotoFile({ type: "image/heic", name: "photo" }), true);
+  assert.equal(isPhotoFile({ type: "application/pdf", name: "photo.pdf" }), false);
+  assert.equal(isPhotoFile({ type: "", name: "notes.txt" }), false);
 });
 
 test("takenLabel: shown only when the camera time differs from when it was added; the date shows if it's another day", () => {
