@@ -21,7 +21,15 @@ import {
   updateWorkSession,
 } from "@/lib/server/fns";
 import type { PhotoTimeSource } from "@/lib/photo-upload";
-import { mayAddSession, mayEditSession, mayReviewSessions, type WorkSession } from "@/lib/work-sessions";
+import {
+  formatMinutes,
+  mayAddSession,
+  mayEditSession,
+  mayReviewSessions,
+  projectTimesFromSessions,
+  sessionsForProjectTime,
+  type WorkSession,
+} from "@/lib/work-sessions";
 
 type Entry = {
   id: string;
@@ -38,12 +46,10 @@ type Entry = {
 };
 
 type DayLog = Record<string, Entry[]>;
-type TimeOverrides = Record<string, Record<string, number>>;
 type StoredSession = { id: string; startMin: number; endMin: number; project: string; notes: string };
 type SessionLog = Record<string, StoredSession[]>;
 
 const STORAGE_KEY = "rcl-tracking-log";
-const TIMES_KEY = "rcl-tracking-times";
 const SESSIONS_KEY = "rcl-tracking-sessions";
 const SAMPLE_DAY = "2026-11-02";
 
@@ -63,19 +69,6 @@ function loadLog(): DayLog {
 
 function saveLog(log: DayLog) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(log));
-}
-
-function loadTimes(): TimeOverrides {
-  try {
-    const raw = localStorage.getItem(TIMES_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveTimes(times: TimeOverrides) {
-  localStorage.setItem(TIMES_KEY, JSON.stringify(times));
 }
 
 function loadSessions(): SessionLog {
@@ -237,13 +230,6 @@ function photoWhen(e: Entry): string {
   return photoClockLabel(fields, e.ts, PHOTO_FMT) || clock(e.ts);
 }
 
-function formatMinutes(mins: number): string {
-  const h = Math.floor(mins / 60);
-  const m = Math.round(mins % 60);
-  if (h === 0) return `${m}m`;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
-}
-
 function formatDayLabel(day: string): string {
   try {
     const d = new Date(day + "T12:00:00");
@@ -292,7 +278,6 @@ function TrackingPage() {
   const search = Route.useSearch();
   const [day, setDay] = useState(search.day ?? todayKey());
   const [log, setLog] = useState<DayLog>({});
-  const [times, setTimes] = useState<TimeOverrides>({});
   const [sessions, setSessions] = useState<SessionLog>({});
   const { user, isPending } = useCurrentUserState();
   const [serverSessions, setServerSessions] = useState<WorkSession[] | null>(null);
@@ -331,7 +316,6 @@ function TrackingPage() {
   useEffect(() => {
     const loaded = applySampleCaptions(seedSampleIfEmpty(loadLog()));
     setLog(loaded);
-    setTimes(loadTimes());
     const stored = loadSessions();
     if (!stored[SAMPLE_DAY] && loaded[SAMPLE_DAY]) stored[SAMPLE_DAY] = SAMPLE_SESSIONS;
     setSessions(stored);
@@ -363,6 +347,11 @@ function TrackingPage() {
   const serverMode = Boolean(user) && !isPending && day === todayKey();
   const usingServer = serverMode && serverSessions !== null && role !== null && !hoursError;
   const daySessions = usingServer ? serverSessions : localSessions;
+  // Signed-in time follows the sessions this role may see. On this device, the log is their own.
+  const visibleSessions = useMemo(() => {
+    if (!usingServer || !role || !user?.id) return daySessions;
+    return sessionsForProjectTime(role, user.id, daySessions);
+  }, [usingServer, role, user?.id, daySessions]);
 
   useEffect(() => {
     if (!serverMode) {
@@ -406,44 +395,10 @@ function TrackingPage() {
     return [...names].map((name) => ({ id: name, name }));
   }, [entries, localSessions]);
 
-  const activeProject = daySessions.at(-1)?.projectName ?? "";
+  const activeProject = visibleSessions.at(-1)?.projectName ?? "";
 
-  const autoProjectMinutes = useMemo(() => {
-    const result: Record<string, number> = {};
-    if (entries.length === 0) return result;
-    const sorted = [...entries];
-    for (let i = 0; i < sorted.length; i++) {
-      const e = sorted[i];
-      const proj = e.project || "Unassigned";
-      const start = new Date(e.ts).getTime();
-      let end = start;
-      if (i + 1 < sorted.length) {
-        end = new Date(sorted[i + 1].ts).getTime();
-      } else if (day === todayKey()) {
-        end = Date.now();
-      }
-      const mins = Math.max(0, (end - start) / 60000);
-      result[proj] = (result[proj] || 0) + mins;
-    }
-    return result;
-  }, [entries, day]);
-
-  const projectList = useMemo(() => {
-    const set = new Set<string>();
-    entries.forEach((e) => set.add(e.project || "Unassigned"));
-    return Array.from(set);
-  }, [entries]);
-
-  const displayTimes = useMemo(() => {
-    const overrides = times[day] || {};
-    return projectList.map((p) => ({
-      project: p,
-      minutes: overrides[p] != null ? overrides[p] : Math.round(autoProjectMinutes[p] || 0),
-      isOverride: overrides[p] != null,
-    }));
-  }, [projectList, autoProjectMinutes, times, day]);
-
-  const totalMinutes = displayTimes.reduce((s, t) => s + t.minutes, 0);
+  const projectTimes = useMemo(() => projectTimesFromSessions(visibleSessions), [visibleSessions]);
+  const totalMinutes = projectTimes.reduce((sum, row) => sum + row.minutes, 0);
 
   async function addEntry(partial: Omit<Entry, "id" | "ts">) {
     const loc = await getLocation();
@@ -547,12 +502,6 @@ function TrackingPage() {
     setServerSessions((list) => (list ?? []).filter((session) => session.id !== id));
   }
 
-  function setProjectMinutes(proj: string, minutes: number) {
-    const next = { ...times, [day]: { ...(times[day] || {}), [proj]: minutes } };
-    setTimes(next);
-    saveTimes(next);
-  }
-
   function ensureDay(next: string) {
     if (next && !log[next]) {
       const updated = { ...log, [next]: [] as Entry[] };
@@ -584,9 +533,7 @@ function TrackingPage() {
       dayKey: day,
       dayLabel: new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: "numeric" }),
       items,
-      sessions: daySessions,
-      projectTimes: displayTimes.map((pt) => ({ project: pt.project, label: formatMinutes(pt.minutes) })),
-      totalLabel: formatMinutes(totalMinutes),
+      sessions: visibleSessions,
     });
     return { blob: new Blob([pdf as BlobPart], { type: "application/pdf" }), name: `tracking-${day}.pdf` };
   }
@@ -669,7 +616,7 @@ function TrackingPage() {
         project: e.project ?? "",
         ts: e.ts,
       })),
-      sessions: daySessions.map((session) => ({
+      sessions: visibleSessions.map((session) => ({
         id: session.id,
         startMin: session.startMin,
         endMin: session.endMin,
@@ -776,7 +723,7 @@ function TrackingPage() {
         </p>
       ) : null}
       <WorkDayBar
-        sessions={daySessions}
+        sessions={visibleSessions}
         projects={usingServer ? jobs : projectChoices}
         freeText={!usingServer}
         canWrite={usingServer ? mayAddSession(role ?? "") : !serverMode || Boolean(hoursError)}
@@ -835,30 +782,24 @@ function TrackingPage() {
         )}
       </div>
 
-      {displayTimes.length > 0 && (
-        <div className="mb-6 rounded border border-line bg-raised p-4">
+      {projectTimes.length > 0 && (
+        <div className="mb-6 rounded border border-line bg-raised p-4" data-testid="project-time">
           <h2 className="mb-3 text-sm font-semibold">Project time</h2>
           <div className="space-y-2">
-            {displayTimes.map((pt) => (
-              <div key={pt.project} className="flex items-center justify-between text-sm">
+            {projectTimes.map((pt) => (
+              <div key={pt.project} className="flex items-center justify-between text-sm" data-testid="project-time-row">
                 <span>{pt.project}</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={pt.minutes}
-                  onChange={(e) => setProjectMinutes(pt.project, Number(e.target.value) || 0)}
-                  className="w-20 rounded border border-line bg-surface px-2 py-1 text-right text-sm"
-                />
-                <span className="w-16 text-right text-muted">{formatMinutes(pt.minutes)}</span>
+                <span className="tabular-nums" data-testid="project-time-amount">
+                  {formatMinutes(pt.minutes)}
+                </span>
               </div>
             ))}
             <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm font-medium">
               <span>Total</span>
-              <span>{formatMinutes(totalMinutes)}</span>
+              <span data-testid="project-time-total">{formatMinutes(totalMinutes)}</span>
             </div>
           </div>
-          <p className="mt-2 text-xs text-muted">Times are automatic from your logs. Edit the minutes to override.</p>
+          <p className="mt-2 text-xs text-muted">From the hours entered on the sessions above.</p>
         </div>
       )}
 

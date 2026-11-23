@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   clockFromMinutes,
+  formatMinutes,
   inputToMinutes,
   labelSessions,
   minutesToInput,
@@ -109,7 +110,7 @@ export function WorkDayBar({
               {dayLabel ? <span className="ml-2 font-normal text-muted">{dayLabel}</span> : null}
             </span>
             <span className="tabular-nums text-muted" data-testid="hours-total">
-              {total === 0 ? "0h" : clockSpan(total)}
+              {total === 0 ? "0h" : formatMinutes(total)}
             </span>
           </div>
           <div className="relative h-9 rounded-md bg-raised" role="img" aria-label={aria}>
@@ -263,11 +264,4 @@ export function WorkDayBar({
       ) : null}
     </section>
   );
-}
-
-function clockSpan(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (h === 0) return `${m}m`;
-  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }

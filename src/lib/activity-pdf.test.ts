@@ -24,11 +24,9 @@ test("activity PDF puts the creation time above the caption, and still letters s
       },
     ],
     sessions: [
-      { id: "b", startMin: 13 * 60, projectName: "Project B", notes: "drywall takeoffs" },
-      { id: "a", startMin: 8 * 60, projectName: "Project A", notes: "demolish fence" },
+      { id: "b", startMin: 13 * 60, endMin: 16 * 60, projectName: "Project B", notes: "drywall takeoffs" },
+      { id: "a", startMin: 8 * 60, endMin: 11 * 60 + 30, projectName: "Project A", notes: "demolish fence" },
     ],
-    projectTimes: [],
-    totalLabel: "0m",
   });
   assert.ok(Buffer.from(bytes).toString("latin1").startsWith("%PDF-1.4"));
   const text = extractPdfText(bytes).join("");
@@ -40,4 +38,46 @@ test("activity PDF puts the creation time above the caption, and still letters s
   assert.ok(fileTime > rotten && counted > fileTime, "file time is labeled and sits above its caption");
   assert.match(text, /a {2}Project A demolish fence {3}b {2}Project B drywall takeoffs/);
   assert.ok(text.includes("(not camera)"));
+  assert.match(text, /Project A: 3h 30m/);
+  assert.match(text, /Project B: 3h/);
+  assert.match(text, /Total: 6h 30m/);
+});
+
+test("activity PDF project time is the entered session, on that session's project", () => {
+  // Charlie, 23 Nov 2026: photos captioned 4:14, 4:16 and 4:18 PM, and a 30-minute Greenville
+  // session. The old export printed "Unassigned: 1m" from the gaps between log times.
+  const bytes = buildActivityPdf({
+    dayKey: "2026-11-23",
+    dayLabel: "Monday, Nov 23, 2026",
+    items: [
+      { kind: "photo", captionTime: "4:18 PM", caption: "", jpeg: null },
+      { kind: "photo", captionTime: "4:16 PM", caption: "", jpeg: null },
+      { kind: "photo", captionTime: "4:14 PM", caption: "", jpeg: null },
+    ],
+    sessions: [
+      { id: "a", startMin: 16 * 60, endMin: 16 * 60 + 30, projectName: "Greenville", notes: "Shiplap placement, attic access" },
+    ],
+  });
+  const text = extractPdfText(bytes).join("");
+  assert.match(text, /a {2}Greenville Shiplap placement, attic access/);
+  assert.match(text, /Greenville: 30m/);
+  assert.match(text, /Total: 30m/);
+  assert.equal(text.includes("Unassigned"), false);
+  assert.equal(text.includes(": 1m"), false);
+});
+
+test("photos with no session do not invent project time", () => {
+  const bytes = buildActivityPdf({
+    dayKey: "2026-11-23",
+    dayLabel: "Monday, Nov 23, 2026",
+    items: [
+      { kind: "photo", captionTime: "4:14 PM", caption: "Boards staged.", project: "Greenville", jpeg: null },
+      { kind: "photo", captionTime: "4:18 PM", caption: "Attic open.", jpeg: null },
+    ],
+    sessions: [],
+  });
+  const text = extractPdfText(bytes).join("");
+  assert.equal(text.includes("Project time"), false);
+  assert.equal(text.includes("Unassigned"), false);
+  assert.equal(text.includes("Total:"), false);
 });

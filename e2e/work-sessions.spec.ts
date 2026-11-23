@@ -100,6 +100,10 @@ test("activity log keeps the day bar, captions photos with the time on top, and 
   expect(counted).toBeGreaterThan(fileTime);
   expect(text).toContain("(not camera)");
   expect(text).toContain("a  Project A demolish fence   b  Project B drywall takeoffs");
+  expect(text).toContain("Project A: 3h 30m");
+  expect(text).toContain("Project B: 3h");
+  expect(text).toContain("Total: 6h 30m");
+  expect(text).not.toContain("Unassigned");
 });
 
 function hoursMinutes(label: string): number {
@@ -111,8 +115,13 @@ function hoursMinutes(label: string): number {
 test("activity log edits lettered hours: times, session b, delete, and the total", async ({ page }) => {
   await page.goto("/tracking");
   const total = page.getByTestId("hours-total");
+  const projectTime = page.getByTestId("project-time");
   await expect(total).toHaveText("6h 30m");
   await expect(page.getByTestId("day-bar")).toContainText("sample");
+  await expect(projectTime.getByTestId("project-time-row").filter({ hasText: "Project A" }).getByTestId("project-time-amount")).toHaveText("3h 30m");
+  await expect(projectTime.getByTestId("project-time-row").filter({ hasText: "Project B" }).getByTestId("project-time-amount")).toHaveText("3h");
+  await expect(projectTime.getByTestId("project-time-total")).toHaveText("6h 30m");
+  await expect(projectTime).not.toContainText("Unassigned");
 
   const rowA = page.getByTestId("session-row").filter({ hasText: "Project A" });
   await rowA.getByTestId("edit-session").click();
@@ -121,10 +130,14 @@ test("activity log edits lettered hours: times, session b, delete, and the total
   await edit.getByRole("button", { name: "Save session" }).click();
   await expect(total).toHaveText("7h");
   await expect(rowA).toContainText("12:00 PM");
+  await expect(projectTime.getByTestId("project-time-row").filter({ hasText: "Project A" }).getByTestId("project-time-amount")).toHaveText("4h");
+  await expect(projectTime.getByTestId("project-time-total")).toHaveText("7h");
 
   await page.getByTestId("session-row").filter({ hasText: "drywall" }).getByTestId("remove-session").click();
   await expect(page.getByTestId("session-row").filter({ hasText: "drywall" })).toHaveCount(0);
   await expect(total).toHaveText("4h");
+  await expect(projectTime.getByTestId("project-time-row")).toHaveCount(1);
+  await expect(projectTime.getByTestId("project-time-total")).toHaveText("4h");
   await expect(page.getByTestId("day-bar").getByRole("img")).not.toContainText("b");
 
   await page.getByTestId("add-session").click();
@@ -139,9 +152,12 @@ test("activity log edits lettered hours: times, session b, delete, and the total
   await expect(rowB).toContainText("Project B");
   await expect(rowB).toContainText("6:00 PM");
   await expect(total).toHaveText("5h 30m");
+  await expect(projectTime.getByTestId("project-time-row").filter({ hasText: "Project B" }).getByTestId("project-time-amount")).toHaveText("1h 30m");
+  await expect(projectTime.getByTestId("project-time-total")).toHaveText("5h 30m");
 
   await page.reload();
   await expect(page.getByTestId("hours-total")).toHaveText("5h 30m");
+  await expect(page.getByTestId("project-time-total")).toHaveText("5h 30m");
   await expect(page.getByTestId("session-row").filter({ hasText: "set the posts" })).toBeVisible();
   await expect(page.getByTestId("session-row").filter({ hasText: "Project A" })).toContainText("12:00 PM");
 });
@@ -306,6 +322,7 @@ test("signed-in activity log: each role edits only the hours they are allowed to
     await labor.page.getByTestId("session-form").locator("input[type=time]").nth(1).fill("12:00");
     await labor.page.getByTestId("session-form").getByRole("button", { name: "Save session" }).click();
     await expect.poll(async () => hoursMinutes(await labor.page.getByTestId("hours-total").innerText())).toBe(before + 240);
+    await expect(labor.page.getByTestId("project-time-total")).toHaveText(await labor.page.getByTestId("hours-total").innerText());
     await labor.page.reload();
     await expect(labor.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
     await expect(labor.page.getByTestId("session-row").filter({ hasText: note })).toContainText("12:00 PM", { timeout: 30_000 });
@@ -324,6 +341,7 @@ test("signed-in activity log: each role edits only the hours they are allowed to
     const leadRow = lead.page.getByTestId("session-row").filter({ hasText: note });
     await expect(leadRow).toBeVisible({ timeout: 30_000 });
     await expect(leadRow.getByTestId("edit-session")).toHaveCount(0);
+    await expect(lead.page.getByTestId("project-time-total")).toHaveText(await lead.page.getByTestId("hours-total").innerText());
     const leadEdit = await call(lead.page, "updateWorkSession", {
       id: created!.id,
       day,
@@ -349,6 +367,8 @@ test("signed-in activity log: each role edits only the hours they are allowed to
     await subForm.getByLabel("Notes").fill(subNote);
     await subForm.getByRole("button", { name: "Add to the day" }).click();
     await expect(sub.page.getByTestId("session-row").filter({ hasText: subNote }).getByTestId("edit-session")).toBeVisible();
+    await expect(sub.page.getByTestId("project-time")).not.toContainText(note);
+    await expect(sub.page.getByTestId("project-time-total")).toHaveText(await sub.page.getByTestId("hours-total").innerText());
 
     const admin = await as(browser, "admin");
     opened.push(admin);
@@ -368,6 +388,7 @@ test("signed-in activity log: each role edits only the hours they are allowed to
     await owner.page.reload();
     await expect(owner.page.getByTestId("day-bar")).toHaveAttribute("data-source", "server", { timeout: 30_000 });
     await expect(owner.page.getByTestId("session-row").filter({ hasText: "owner fixed" })).toBeVisible({ timeout: 30_000 });
+    await expect(owner.page.getByTestId("project-time-total")).toHaveText(await owner.page.getByTestId("hours-total").innerText());
     await owner.page.getByTestId("session-row").filter({ hasText: "owner fixed" }).getByTestId("remove-session").click();
     await owner.page.getByTestId("session-row").filter({ hasText: subNote }).getByTestId("remove-session").click();
     await expect(owner.page.getByText("owner fixed")).toHaveCount(0);

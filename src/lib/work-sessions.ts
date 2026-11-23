@@ -111,6 +111,41 @@ export function sessionMinutes(session: Pick<WorkSession, "startMin" | "endMin">
   return Math.max(0, session.endMin - session.startMin);
 }
 
+/** A project name that was left blank. Session time is never inferred from photos. */
+export const UNASSIGNED_PROJECT = "Unassigned";
+
+export type ProjectTime = { project: string; minutes: number };
+
+/**
+ * Project time is the entered session length (end minus start), summed per project.
+ * Order follows the first session on that project. A blank name is Unassigned.
+ * Photo timestamps and the gaps between log entries are not a source of time.
+ */
+export function projectTimesFromSessions(
+  sessions: readonly Pick<WorkSession, "id" | "startMin" | "endMin" | "projectName">[],
+): ProjectTime[] {
+  const order: string[] = [];
+  const minutes = new Map<string, number>();
+  for (const session of sortSessions(sessions)) {
+    const project = session.projectName.trim() || UNASSIGNED_PROJECT;
+    if (!minutes.has(project)) {
+      minutes.set(project, 0);
+      order.push(project);
+    }
+    minutes.set(project, (minutes.get(project) ?? 0) + sessionMinutes(session));
+  }
+  return order.map((project) => ({ project, minutes: minutes.get(project) ?? 0 }));
+}
+
+/** "30m", "3h", "3h 30m". Minutes are whole; a fraction rounds to the nearest minute. */
+export function formatMinutes(mins: number): string {
+  const rounded = Math.max(0, Math.round(mins));
+  const h = Math.floor(rounded / 60);
+  const m = rounded % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 export function normalizeSession(input: SessionDraft): { ok: true; value: SessionDraft } | { ok: false; error: string } {
   const startMin = Math.round(input.startMin);
   const endMin = Math.round(input.endMin);
@@ -140,4 +175,20 @@ export function mayEditSession(role: string, ownerId: string | undefined, actorI
   if (!ownerId || !actorId) return false;
   if (ownerId === actorId) return can(role, "session.write");
   return can(role, "session.manage");
+}
+
+/**
+ * Sessions whose durations may be totaled on this person's activity log.
+ * Reviewers (lead and up) include the crew they can see. Labor and subs include
+ * only their own rows; a row with no user id is their on-device log.
+ * A role that cannot log or review hours includes nothing.
+ */
+export function sessionsForProjectTime<T extends Pick<WorkSession, "userId">>(
+  role: string,
+  actorId: string | undefined,
+  sessions: readonly T[],
+): T[] {
+  if (mayReviewSessions(role)) return [...sessions];
+  if (!mayAddSession(role) || !actorId) return [];
+  return sessions.filter((session) => !session.userId || session.userId === actorId);
 }
