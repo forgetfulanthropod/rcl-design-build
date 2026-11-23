@@ -1,10 +1,11 @@
 /**
  * The activity-log PDF. A photo's caption starts with the creation time, then
  * the words the person typed. Saved work sessions stay lettered at the end.
+ * Project time is those sessions' entered durations, not the gaps between photos.
  */
 import { PdfDoc } from "./pdf.ts";
 import { drawSessionCaption } from "./session-caption.ts";
-import type { WorkSession } from "./work-sessions.ts";
+import { formatMinutes, projectTimesFromSessions, type WorkSession } from "./work-sessions.ts";
 
 export type ActivityPdfItem =
   | { kind: "photo"; captionTime: string; caption: string; project?: string; jpeg: Uint8Array | null }
@@ -14,9 +15,7 @@ export type ActivityPdfModel = {
   dayKey: string;
   dayLabel: string;
   items: ActivityPdfItem[];
-  sessions: Pick<WorkSession, "id" | "startMin" | "projectName" | "notes">[];
-  projectTimes: { project: string; label: string }[];
-  totalLabel: string;
+  sessions: Pick<WorkSession, "id" | "startMin" | "endMin" | "projectName" | "notes">[];
 };
 
 export function buildActivityPdf(model: ActivityPdfModel): Uint8Array {
@@ -44,12 +43,14 @@ export function buildActivityPdf(model: ActivityPdfModel): Uint8Array {
     if (item.project) doc.paragraph(`Project: ${item.project}`, 11);
   }
   drawSessionCaption(doc, model.sessions);
-  if (model.projectTimes.length > 0) {
+  const projectTimes = projectTimesFromSessions(model.sessions);
+  if (projectTimes.length > 0) {
     doc.gap(12);
     doc.rule();
     doc.paragraph("Project time", 14, { bold: true });
-    for (const pt of model.projectTimes) doc.paragraph(`${pt.project}: ${pt.label}`, 11);
-    doc.paragraph(`Total: ${model.totalLabel}`, 12, { bold: true });
+    for (const pt of projectTimes) doc.paragraph(`${pt.project}: ${formatMinutes(pt.minutes)}`, 11);
+    const total = projectTimes.reduce((sum, pt) => sum + pt.minutes, 0);
+    doc.paragraph(`Total: ${formatMinutes(total)}`, 12, { bold: true });
   }
   return doc.render({
     title: `Activity log · ${model.dayKey}`,
