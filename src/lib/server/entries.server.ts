@@ -6,7 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { Sql } from "../db.ts";
-import { can, canWith } from "../permissions.ts";
+import { assertCan, can, canWith, ForbiddenError } from "../permissions.ts";
 import { MAX_ENTRIES, planTextSave, sortEntries, type ReportEntry, type TextEdit } from "../report-entries.ts";
 import { sharingFor } from "./sharing.server.ts";
 
@@ -125,6 +125,44 @@ export async function addPhotoEntry(sql: Sql, me: Me, reportId: string, photoId:
     values (${randomUUID()}, ${reportId}, ${me.companyId}, ${me.userId}, 'photo', ${photoId})
   `;
 }
+
+const EDIT_WINDOW_MS = 36 * 3_600_000;
+
+function reportDay(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${value.getUTCFullYear()}-${p(value.getUTCMonth() + 1)}-${p(value.getUTCDate())}`;
+  }
+  return text(value).slice(0, 10);
+}
+
+/**
+ * Delete one photo from the author's own open report, including the stored bytes.
+ * Same edit rule as writing the report: report.write, your photo, today's unsubmitted report.
+ */
+export async function removePhoto(sql: Sql, me: Me, photoId: string): Promise<{ day: string }> {
+  assertCan(me.role, "report.write");
+  const rows = await sql<{ user_id: string; report_id: string; day: unknown; submitted_at: unknown }>`
+    select p.user_id, p.report_id, r.day, r.submitted_at
+    from daily_report_photos p
+    join daily_reports r on r.id = p.report_id
+    where p.id = ${photoId} and p.company_id = ${me.companyId}
+  `;
+  const photo = rows[0];
+  if (!photo) throw new Error("Photo not found.");
+  if (text(photo.user_id) !== me.userId) throw new Error("You can only remove photos from your own report.");
+  if (photo.submitted_at) throw new Error("Today's report is already submitted.");
+  const day = reportDay(photo.day);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Math.abs(Date.parse(`${day}T12:00:00Z`) - Date.now()) > EDIT_WINDOW_MS) {
+    throw new Error("You can only write today's report.");
+  }
+  await sql`delete from daily_report_entries where report_id = ${text(photo.report_id)} and photo_id = ${photoId}`;
+  await sql`delete from daily_report_photos where id = ${photoId} and company_id = ${me.companyId}`;
+  await sql`update daily_reports set last_edit_at = now() where id = ${text(photo.report_id)}`;
+  return { day };
+}
+
+export { ForbiddenError };
 
 /**
  * Who may download a report as a PDF: Owner/Admin/superadmin any report in the company

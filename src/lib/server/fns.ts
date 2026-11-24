@@ -384,6 +384,16 @@ export const addMyPhoto = createServerFn({ method: "POST" })
     return run(context.userId, data);
   });
 
+export const removeMyPhoto = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string }) => ({ id: required(input?.id, 80, "Photo") }))
+  .handler(async ({ data, context }) => {
+    const { me, assertCan } = await reportsFor(context.userId);
+    assertCan(me.role, "report.write");
+    const { removeMyPhoto: run } = await import("./reports.server");
+    return run(context.userId, data);
+  });
+
 export const submitMyReport = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .validator((input: { day: string; lunchMinutes: number }) => ({ day: dayArg(input?.day), lunchMinutes: Number(input?.lunchMinutes) }))

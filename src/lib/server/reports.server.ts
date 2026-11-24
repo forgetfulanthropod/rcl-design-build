@@ -3,7 +3,7 @@ import { getSql, type Sql } from "@/lib/db";
 import { can, ForbiddenError } from "@/lib/permissions";
 import { splitPhotoClock, storedPhotoClock } from "@/lib/photo-upload";
 import { legacyEntries, type ReportEntry, type TextEdit } from "@/lib/report-entries";
-import { addPhotoEntry, backfillEntries, entriesFor, pdfFlags, saveTextEntries } from "./entries.server";
+import { addPhotoEntry, backfillEntries, entriesFor, pdfFlags, removePhoto, saveTextEntries } from "./entries.server";
 
 const isPrincipal = (role: string) => can(role, "report.review");
 
@@ -240,6 +240,14 @@ export async function addMyPhoto(
             ${full.bytes.length}, ${Math.round(input.width) || null}, ${Math.round(input.height) || null}, ${clock.at}, ${clock.source})
   `;
   await addPhotoEntry(sql, me, id, photoId);
+  return getMyReport(userId, day);
+}
+
+/** Remove a saved photo from the author's own open report and from storage. */
+export async function removeMyPhoto(userId: string, input: { id: string }) {
+  const sql = await getSql();
+  const me = await member(sql, userId);
+  const { day } = await removePhoto(sql, me, input.id);
   return getMyReport(userId, day);
 }
 
