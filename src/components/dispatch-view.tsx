@@ -5,17 +5,20 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Send } from "lucide-react";
 import {
   addDispatchLocation,
   addDispatchPerson,
+  claimDispatchSends,
   getDispatch,
   placeDispatch,
   removeDispatchPerson,
+  sendDispatchDay,
   setDispatchDayNote,
   setDispatchPersonKind,
   setDispatchPersonNote,
   setDispatchPhone,
+  undoDispatchSend,
   updateDispatchLocation,
 } from "@/lib/server/fns";
 import { Button, Chip, EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
@@ -30,6 +33,7 @@ import {
   formatDispatchWeek,
   kindLabel,
   placementForDrop,
+  sendResultLabel,
   type DispatchKind,
 } from "@/lib/dispatch";
 
@@ -86,6 +90,112 @@ function NoteField({
       />
       {saved ? <span className="text-xs text-pine">Saved</span> : null}
     </label>
+  );
+}
+
+function SendDock({
+  day,
+  send,
+  canEdit,
+  onRefresh,
+}: {
+  day: string;
+  send: Board["send"];
+  canEdit: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const [toast, setToast] = useState("");
+  const [undoId, setUndoId] = useState<string | null>(null);
+  const scheduled = send.scheduled;
+  const scheduledId = scheduled?.id ?? null;
+  const refreshRef = useRef(onRefresh);
+  refreshRef.current = onRefresh;
+  const dismissed = useRef<string | null>(null);
+  const sendAtRef = useRef(scheduled?.sendAt ?? "");
+  sendAtRef.current = scheduled?.sendAt ?? "";
+  useEffect(() => {
+    if (!scheduledId) {
+      setUndoId(null);
+      return;
+    }
+    if (dismissed.current === scheduledId) return;
+    setUndoId(scheduledId);
+    const left = Math.min(5_000, Math.max(0, new Date(sendAtRef.current).getTime() - Date.now()));
+    const timer = window.setTimeout(() => {
+      dismissed.current = scheduledId;
+      setUndoId((current) => (current === scheduledId ? null : current));
+      void claimDispatchSends({ data: { id: scheduledId } })
+        .then(async (result) => {
+          const job = result.jobs.find((item) => item.id === scheduledId) ?? result.jobs[0];
+          if (job) setToast(sendResultLabel(job));
+          await refreshRef.current();
+        })
+        .catch((cause: unknown) => {
+          setToast(cause instanceof Error ? cause.message : "Could not send.");
+        });
+    }, left);
+    return () => window.clearTimeout(timer);
+  }, [scheduledId]);
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+  if (!canEdit) return null;
+  const undoOpen = undoId !== null && undoId === scheduled?.id;
+  const enabled = send.pending && !undoOpen;
+  return (
+    <>
+      <div
+        className="fixed bottom-24 right-4 z-30 flex flex-col items-end gap-2 md:bottom-6"
+        data-testid="dispatch-send-dock"
+      >
+        <p className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-muted shadow" data-testid="dispatch-last-sent">
+          {send.lastSentLabel}
+        </p>
+        {undoOpen ? (
+          <button
+            type="button"
+            data-testid="dispatch-undo"
+            className="h-11 rounded-full bg-raised px-4 text-sm font-medium text-fg shadow"
+            onClick={() => {
+              if (!scheduled) return;
+              void undoDispatchSend({ data: { id: scheduled.id } })
+                .then(() => onRefresh())
+                .catch((cause: unknown) => setToast(cause instanceof Error ? cause.message : "Could not undo."));
+            }}
+          >
+            Undo
+          </button>
+        ) : null}
+        <button
+          type="button"
+          data-testid="dispatch-send"
+          data-state={enabled ? "pending" : "idle"}
+          aria-label={enabled ? "Send this day's dispatch" : "Nothing new to send"}
+          aria-disabled={!enabled}
+          disabled={!enabled}
+          className={`grid h-14 w-14 place-items-center rounded-full shadow-lg ${enabled ? "bg-[#1f8a4c] text-white" : "cursor-not-allowed bg-[#6b6560] text-[#cfc6ba]"}`}
+          onClick={() => {
+            if (!enabled) return;
+            void sendDispatchDay({ data: { day } })
+              .then(() => onRefresh())
+              .catch((cause: unknown) => setToast(cause instanceof Error ? cause.message : "Could not send."));
+          }}
+        >
+          <Send className="size-6" aria-hidden />
+        </button>
+      </div>
+      {toast ? (
+        <p
+          role="status"
+          data-testid="dispatch-toast"
+          className="fixed bottom-44 right-4 z-30 max-w-xs rounded-md border border-line bg-surface px-3 py-2 text-sm shadow md:bottom-28"
+        >
+          {toast}
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -316,12 +426,12 @@ export function DispatchView() {
           }}
           onRemoveLocation={(id) =>
             void run(
-              () => updateDispatchLocation({ data: { id, archived: true } }),
+              () => updateDispatchLocation({ data: { id, archived: true, day } }),
               "Could not remove that location.",
             )
           }
           onSaveStanding={(id, notes) =>
-            updateDispatchLocation({ data: { id, notes } })
+            updateDispatchLocation({ data: { id, notes, day } })
               .then(() => refresh())
               .catch((cause: unknown) => {
                 setError(message(cause, "Could not save that."));
@@ -345,7 +455,7 @@ export function DispatchView() {
               })
           }
           onSavePhone={(userId, phone) =>
-            setDispatchPhone({ data: { userId, phone } })
+            setDispatchPhone({ data: { userId, phone, day } })
               .then(() => refresh())
               .catch((cause: unknown) => {
                 setError(message(cause, "Could not save that number."));
@@ -354,7 +464,7 @@ export function DispatchView() {
           }
           onCreateLocation={(input) =>
             void run(
-              () => addDispatchLocation({ data: input }),
+              () => addDispatchLocation({ data: { ...input, day } }),
               "Could not add that location.",
             ).then((ok) => ok && setAddingLoc(false))
           }
@@ -395,6 +505,7 @@ export function DispatchView() {
           onClick={() => setMenu(null)}
         />
       ) : null}
+      {showing ? <SendDock day={day} send={showing.send} canEdit={showing.canEdit} onRefresh={() => refresh()} /> : null}
     </div>
   );
 }

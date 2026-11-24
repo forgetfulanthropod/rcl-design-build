@@ -19,6 +19,8 @@ const MUTATIONS = [
   ["placeDispatch", { userId: "x", day: "2026-11-24", locationId: "x" }],
   ["setDispatchPersonNote", { userId: "x", day: "2026-11-24", notes: "no" }],
   ["setDispatchPhone", { userId: "x", phone: "8595550100" }],
+  ["sendDispatchDay", { day: "2026-11-24" }],
+  ["undoDispatchSend", { id: "x" }],
   ["removeDispatchPerson", { userId: "x" }],
 ] as const;
 
@@ -133,6 +135,7 @@ for (const role of ["labor", "subcontractor"] as const) {
     await expect(page.getByTestId("dispatch-readonly")).toBeVisible();
     await expect(page.getByTestId("dispatch-add-location")).toHaveCount(0);
     await expect(page.getByTestId("dispatch-handle")).toHaveCount(0);
+    await expect(page.getByTestId("dispatch-send")).toHaveCount(0);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     );
@@ -270,7 +273,15 @@ test("owner: day board, drag between locations, carry-forward, and the week", as
   await expect(week.getByText("Shop").first()).toBeVisible();
   await expect(week.getByText("Bring the trailer.").first()).toBeVisible();
   await expect(week.getByText("Call the homeowner.").first()).toBeVisible();
-  await expect(week.getByText("+1 859-555-0199").first()).toBeVisible();
+  await expect(week.getByText("+1 859-555-0199", { exact: true }).first()).toBeVisible();
+  const fab = page.getByTestId("dispatch-send");
+  await expect(fab).toHaveAttribute("data-state", "pending");
+  await expect(fab).toBeEnabled();
+  await expect(page.getByTestId("dispatch-last-sent")).toHaveText("Never sent");
+  const box = await fab.boundingBox();
+  expect(box).toBeTruthy();
+  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeGreaterThan(1200);
+  expect((box?.y ?? 0) + (box?.height ?? 0)).toBeGreaterThan(740);
   await ctx.close();
 });
 
@@ -297,6 +308,7 @@ test("labor sees the day's instructions and phone, and cannot change them", asyn
   await expect(luis.getByTestId("dispatch-phone")).toHaveText("+1 859-555-0199");
   await expect(page.getByRole("button", { name: /Instruction for/ })).toHaveCount(0);
   await expect(page.getByLabel("Phone for Luis Moreno")).toHaveCount(0);
+  await expect(page.getByTestId("dispatch-send")).toHaveCount(0);
   for (const [fn, data] of [
     ["setDispatchPersonNote", { userId: "x", day: "2026-11-24", notes: "no" }],
     ["setDispatchPhone", { userId: "x", phone: "8595550100" }],
@@ -306,5 +318,32 @@ test("labor sees the day's instructions and phone, and cannot change them", asyn
     expect(result.ok, fn).toBe(false);
     expect(result.error, fn).toContain("dispatch.edit");
   }
+  await ctx.close();
+});
+
+test("undo shows for 5 seconds without a confirm dialog", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: DESKTOP });
+  const page = await ctx.newPage();
+  await page.clock.install();
+  await page.goto("/login");
+  await page.getByTestId("debug-login").getByRole("button", { name: "Owner", exact: true }).click();
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
+  await page.goto("/dispatch");
+  await expect(page.getByTestId("dispatch-start")).toBeVisible();
+  const added = await call(page, "addDispatchLocation", { name: "Undo yard" });
+  expect(added.ok, added.error).toBe(true);
+  await page.reload();
+  await expect(page.getByTestId("dispatch-start")).toBeVisible();
+  const fab = page.getByTestId("dispatch-send");
+  await expect(fab).toBeEnabled();
+  let dialog = false;
+  page.on("dialog", () => {
+    dialog = true;
+  });
+  await fab.click();
+  await expect(page.getByTestId("dispatch-undo")).toBeVisible();
+  expect(dialog).toBe(false);
+  await page.clock.fastForward(5_000);
+  await expect(page.getByTestId("dispatch-undo")).toHaveCount(0);
   await ctx.close();
 });

@@ -69,3 +69,37 @@ create table if not exists dispatch_person_notes (
   primary key (company_id, user_id, day),
   check (char_length(notes) between 1 and 800)
 );
+
+-- A change that makes a day's sheet dirty until that day is sent.
+create table if not exists dispatch_changes (
+  id text primary key,
+  company_id text not null references companies (id) on delete cascade,
+  day date not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists dispatch_changes_day_idx on dispatch_changes (company_id, day, created_at);
+
+create table if not exists dispatch_day_sends (
+  company_id text not null references companies (id) on delete cascade,
+  day date not null,
+  last_sent_at timestamptz,
+  primary key (company_id, day)
+);
+
+-- One open send per company-day. Claiming flips status so a second worker cannot text twice.
+create table if not exists dispatch_send_jobs (
+  id text primary key,
+  company_id text not null references companies (id) on delete cascade,
+  day date not null,
+  status text not null check (status in ('scheduled', 'sending', 'sent', 'cancelled')),
+  send_at timestamptz not null,
+  created_by text not null,
+  created_at timestamptz not null default now(),
+  finished_at timestamptz,
+  result_sent integer not null default 0,
+  result_skipped integer not null default 0,
+  result_configured boolean not null default false
+);
+create unique index if not exists dispatch_send_jobs_open_idx
+  on dispatch_send_jobs (company_id, day)
+  where status = 'scheduled';

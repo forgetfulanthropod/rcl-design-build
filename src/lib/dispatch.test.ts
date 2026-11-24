@@ -11,6 +11,8 @@ import {
   toE164,
   createDragGate,
   dispatchMessage,
+  formatLastSent,
+  sendResultLabel,
   type PlacementRow,
   type RosterPerson,
 } from "./dispatch.ts";
@@ -144,6 +146,13 @@ test("a dispatch text names one person, their number, and only their instruction
   assert.match(cleared, /For you: cleared/);
   assert.doesNotMatch(cleared, /Call the homeowner/);
   assert.doesNotMatch(cleared, /Number on file/);
+});
+
+test("last sent is Eastern time, or never", () => {
+  assert.equal(formatLastSent(null), "Never sent");
+  assert.equal(formatLastSent("2026-11-24T12:42:00.000Z"), "Last sent 7:42 AM");
+  assert.equal(sendResultLabel({ sent: 2, skippedNoPhone: 1, configured: true }), "Sent 2. 1 skipped, no phone.");
+  assert.match(sendResultLabel({ sent: 0, skippedNoPhone: 0, configured: false }), /aren't configured/);
 });
 
 test("rapid drags keep only the last location", async () => {

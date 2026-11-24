@@ -17,20 +17,24 @@ import { randomUUID } from "node:crypto";
 import type { Sql } from "../db.ts";
 import { assertCan, can, ForbiddenError } from "../permissions.ts";
 import {
+  DISPATCH_SEND_DELAY_MS,
   DISPATCH_START_LABEL,
   DISPATCH_START_MIN,
   NOTE_MAX,
   dispatchMessage,
   dispatchWeekDays,
   formatDispatchDay,
+  formatLastSent,
   isDispatchKind,
   resolveDay,
+  todayInNewYork,
   toE164,
   type DispatchKind,
   type PlacementRow,
   type ResolvedPlacement,
 } from "../dispatch.ts";
-import { formatDay, weekStart as mondayOf } from "../crew.ts";
+import { addDays, formatDay, weekStart as mondayOf } from "../crew.ts";
+import { isSmsConfigured } from "./sms.server.ts";
 
 export { ForbiddenError };
 
@@ -163,6 +167,12 @@ export type DispatchBoard = {
   daysPlaced: { day: string; placements: ResolvedPlacement[] }[];
   projects: { id: string; name: string; address: string }[];
   candidates: { userId: string; name: string; role: string }[];
+  send: {
+    pending: boolean;
+    lastSentAt: string | null;
+    lastSentLabel: string;
+    scheduled: { id: string; sendAt: string } | null;
+  };
 };
 
 export type DispatchNotice = { userId: string; to: string; body: string };
@@ -179,6 +189,7 @@ export async function getBoard(
   const sql = await db(sqlIn);
   const m = await me(sql, userId);
   assertCan(m.role, "dispatch.view");
+  await claimCompany(sql, m.companyId, new Date(), undefined, sqlIn);
   const day = input.day && /^\d{4}-\d{2}-\d{2}$/.test(input.day) ? input.day : isoDate(new Date());
   const monday = mondayOf(day);
   const days = dispatchWeekDays(day);
@@ -288,6 +299,7 @@ export async function getBoard(
     daysPlaced,
     projects,
     candidates,
+    send: await loadSendState(sql, m.companyId, day),
   };
 }
 
@@ -306,7 +318,7 @@ async function assertLocation(
 
 export async function addLocation(
   userId: string,
-  input: { projectId?: string | null; name?: string; address?: string; notes?: string },
+  input: { projectId?: string | null; name?: string; address?: string; notes?: string; day?: string },
   sqlIn?: Sql,
 ): Promise<{ id: string }> {
   const sql = await db(sqlIn);
@@ -335,6 +347,7 @@ export async function addLocation(
         set archived = false, name = ${name}, address = ${address}, notes = ${notes}, updated_at = now()
         where id = ${text(existing[0].id)}
       `;
+      await markPending(sql, m.companyId, [input.day || todayInNewYork()]);
       return { id: text(existing[0].id) };
     }
   } else if (!name) {
@@ -355,12 +368,13 @@ export async function addLocation(
     insert into dispatch_locations (id, company_id, project_id, name, address, notes, sort, created_by)
     values (${id}, ${m.companyId}, ${projectId}, ${name}, ${address}, ${notes}, ${Number(sortRow[0]?.n ?? 1)}, ${m.userId})
   `;
+  await markPending(sql, m.companyId, [input.day || todayInNewYork()]);
   return { id };
 }
 
 export async function updateLocation(
   userId: string,
-  input: { id: string; name?: string; address?: string; notes?: string; archived?: boolean },
+  input: { id: string; name?: string; address?: string; notes?: string; archived?: boolean; day?: string },
   sqlIn?: Sql,
 ): Promise<{ ok: true }> {
   const sql = await db(sqlIn);
@@ -389,6 +403,7 @@ export async function updateLocation(
     set name = ${name}, address = ${address}, notes = ${notes}, archived = ${archived}, updated_at = now()
     where id = ${input.id} and company_id = ${m.companyId}
   `;
+  await markPending(sql, m.companyId, [input.day || todayInNewYork()]);
   return { ok: true };
 }
 
@@ -409,6 +424,7 @@ export async function setDayNote(
   if (!notes) {
     if (!existing[0]) return { ok: true };
     await sql`delete from dispatch_day_notes where location_id = ${input.locationId} and day = ${input.day}::date`;
+    await markPending(sql, m.companyId, [input.day]);
     await notifyAssignees(sql, m, input.day, input.locationId, "location", sqlIn, hooks);
     return { ok: true };
   }
@@ -418,6 +434,7 @@ export async function setDayNote(
     on conflict (location_id, day) do update
     set notes = ${notes}, updated_by = ${m.userId}, updated_at = now()
   `;
+  await markPending(sql, m.companyId, [input.day]);
   await notifyAssignees(sql, m, input.day, input.locationId, null, sqlIn, hooks);
   return { ok: true };
 }
@@ -505,6 +522,7 @@ export async function removePerson(
   if (!roster[0]) throw new Error(NOT_FOUND);
   await sql`delete from dispatch_placements where company_id = ${m.companyId} and user_id = ${input.userId}`;
   await sql`delete from dispatch_roster where company_id = ${m.companyId} and user_id = ${input.userId}`;
+  await markPending(sql, m.companyId, Array.from({ length: 14 }, (_, i) => addDays(todayInNewYork(), i)));
   return { ok: true };
 }
 
@@ -552,6 +570,11 @@ export async function placePerson(
     await writePlacement(sql, m, target, input.day, locationId, kind);
   }
   await notifyPeople(sql, m, input.day, [target], null, "assignment", sqlIn, hooks);
+  const touched = [input.day];
+  if (kind === "full") {
+    for (let i = 1; i <= 13; i += 1) touched.push(addDays(input.day, i));
+  }
+  await markPending(sql, m.companyId, touched);
   return { ok: true };
 }
 
@@ -580,6 +603,7 @@ export async function setPersonNote(
       delete from dispatch_person_notes
       where company_id = ${m.companyId} and user_id = ${target} and day = ${input.day}::date
     `;
+    await markPending(sql, m.companyId, [input.day]);
     await notifyPeople(sql, m, input.day, [target], "person", "instruction", sqlIn, hooks);
     return { ok: true };
   }
@@ -589,13 +613,14 @@ export async function setPersonNote(
     on conflict (company_id, user_id, day) do update
     set notes = ${notes}, updated_by = ${m.userId}, updated_at = now()
   `;
+  await markPending(sql, m.companyId, [input.day]);
   await notifyPeople(sql, m, input.day, [target], null, "instruction", sqlIn, hooks);
   return { ok: true };
 }
 
 export async function setPersonPhone(
   userId: string,
-  input: { userId: string; phone: string },
+  input: { userId: string; phone: string; day?: string },
   sqlIn?: Sql,
 ): Promise<{ phone: string | null }> {
   const sql = await db(sqlIn);
@@ -613,6 +638,9 @@ export async function setPersonPhone(
     update profiles set phone = ${phone}
     where user_id = ${target} and company_id = ${m.companyId}
   `;
+  const start = input.day || todayInNewYork();
+  const touched = Array.from({ length: 14 }, (_, i) => addDays(start, i));
+  await markPending(sql, m.companyId, touched);
   return { phone };
 }
 
@@ -744,3 +772,267 @@ async function notifyPeople(
     }
   }
 }
+
+async function markPending(sql: Sql, companyId: string, days: string[]): Promise<void> {
+  const unique = [...new Set(days.filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(day)))];
+  for (const day of unique) {
+    await sql`
+      insert into dispatch_changes (id, company_id, day) values (${randomUUID()}, ${companyId}, ${day}::date)
+    `;
+  }
+}
+
+export type SendResult = { sent: number; skippedNoPhone: number; configured: boolean };
+
+async function loadSendState(sql: Sql, companyId: string, day: string): Promise<DispatchBoard["send"]> {
+  const sent = await sql<{ last_sent_at: string | Date | null }>`
+    select last_sent_at from dispatch_day_sends where company_id = ${companyId} and day = ${day}::date
+  `;
+  const raw = sent[0]?.last_sent_at;
+  const lastSentAt = raw instanceof Date ? raw.toISOString() : raw ? String(raw) : null;
+  const dirty = await sql<{ n: number }>`
+    select count(*)::int as n from dispatch_changes
+    where company_id = ${companyId} and day = ${day}::date
+      and created_at > coalesce(
+        (select last_sent_at from dispatch_day_sends where company_id = ${companyId} and day = ${day}::date),
+        '1970-01-01'::timestamptz
+      )
+  `;
+  const open = await sql<{ id: string; send_at: string | Date }>`
+    select id, send_at from dispatch_send_jobs
+    where company_id = ${companyId} and day = ${day}::date and status = 'scheduled'
+    order by created_at desc
+    limit 1
+  `;
+  const sendAt = open[0] ? (open[0].send_at instanceof Date ? open[0].send_at.toISOString() : String(open[0].send_at)) : null;
+  return {
+    pending: Number(dirty[0]?.n ?? 0) > 0,
+    lastSentAt,
+    lastSentLabel: formatLastSent(lastSentAt),
+    scheduled: open[0] && sendAt ? { id: text(open[0].id), sendAt } : null,
+  };
+}
+
+const claimTimers = new Set<ReturnType<typeof setTimeout>>();
+
+function armClaim(delayMs: number): void {
+  const timer = setTimeout(() => {
+    claimTimers.delete(timer);
+    void (async () => {
+      try {
+        const { getSql } = await import("../db.ts");
+        await claimCompany(await getSql(), null, new Date(), undefined, undefined);
+      } catch (cause) {
+        console.warn("[dispatch] delayed send failed", cause instanceof Error ? cause.message : "");
+      }
+    })();
+  }, delayMs);
+  claimTimers.add(timer);
+}
+
+export async function scheduleDaySend(
+  userId: string,
+  input: { day: string },
+  sqlIn?: Sql,
+  hooks?: DispatchHooks,
+): Promise<{ id: string; sendAt: string }> {
+  const sql = await db(sqlIn);
+  const m = await me(sql, userId);
+  assertCan(m.role, "dispatch.edit");
+  await claimCompany(sql, m.companyId, new Date(), hooks, sqlIn);
+  const state = await loadSendState(sql, m.companyId, input.day);
+  if (state.scheduled) return { id: state.scheduled.id, sendAt: state.scheduled.sendAt };
+  if (!state.pending) throw new Error("Nothing new to send.");
+  const sendAt = new Date(Date.now() + DISPATCH_SEND_DELAY_MS);
+  const id = randomUUID();
+  await sql`
+    insert into dispatch_send_jobs (id, company_id, day, status, send_at, created_by)
+    values (${id}, ${m.companyId}, ${input.day}::date, ${"scheduled"}, ${sendAt.toISOString()}::timestamptz, ${m.userId})
+  `;
+  if (!sqlIn) armClaim(DISPATCH_SEND_DELAY_MS);
+  return { id, sendAt: sendAt.toISOString() };
+}
+
+export async function undoDaySend(userId: string, input: { id: string }, sqlIn?: Sql): Promise<{ ok: true }> {
+  const sql = await db(sqlIn);
+  const m = await me(sql, userId);
+  assertCan(m.role, "dispatch.edit");
+  const rows = await sql<{ id: string }>`
+    update dispatch_send_jobs
+    set status = 'cancelled', finished_at = now()
+    where id = ${input.id} and company_id = ${m.companyId} and status = 'scheduled' and send_at > now()
+    returning id
+  `;
+  if (!rows[0]) throw new Error("That send already went out.");
+  return { ok: true };
+}
+
+export async function claimDueSends(
+  userId: string,
+  input: { id?: string } = {},
+  sqlIn?: Sql,
+  hooks?: DispatchHooks,
+  now = new Date(),
+): Promise<{ jobs: (SendResult & { id: string; day: string })[] }> {
+  const sql = await db(sqlIn);
+  const m = await me(sql, userId);
+  assertCan(m.role, "dispatch.view");
+  const jobs = await claimCompany(sql, m.companyId, now, hooks, sqlIn);
+  if (input.id && !jobs.some((job) => job.id === input.id)) {
+    const done = await sql<{
+      id: string;
+      day: string;
+      result_sent: number;
+      result_skipped: number;
+      result_configured: boolean;
+      status: string;
+    }>`
+      select id, day::text as day, result_sent, result_skipped, result_configured, status
+      from dispatch_send_jobs where id = ${input.id} and company_id = ${m.companyId}
+    `;
+    if (done[0]?.status === "sent") {
+      jobs.push({
+        id: text(done[0].id),
+        day: isoDate(done[0].day),
+        sent: Number(done[0].result_sent),
+        skippedNoPhone: Number(done[0].result_skipped),
+        configured: on(done[0].result_configured),
+      });
+    }
+  }
+  return { jobs };
+}
+
+async function claimCompany(
+  sql: Sql,
+  companyId: string | null,
+  now: Date,
+  hooks: DispatchHooks | undefined,
+  sqlIn: Sql | undefined,
+): Promise<(SendResult & { id: string; day: string })[]> {
+  const due = await sql.query<{ id: string; company_id: string; day: string; created_by: string }>(
+    companyId
+      ? `select id, company_id, day::text as day, created_by from dispatch_send_jobs
+         where company_id = $1 and status = 'scheduled' and send_at <= $2::timestamptz
+         order by send_at`
+      : `select id, company_id, day::text as day, created_by from dispatch_send_jobs
+         where status = 'scheduled' and send_at <= $1::timestamptz
+         order by send_at`,
+    companyId ? [companyId, now.toISOString()] : [now.toISOString()],
+  );
+  const finished: (SendResult & { id: string; day: string })[] = [];
+  for (const job of due) {
+    const won = await sql<{ id: string }>`
+      update dispatch_send_jobs set status = 'sending'
+      where id = ${text(job.id)} and status = 'scheduled'
+      returning id
+    `;
+    if (!won[0]) continue;
+    const result = await deliverScheduled(sql, {
+      id: text(job.id),
+      companyId: text(job.company_id),
+      day: isoDate(job.day),
+      createdBy: text(job.created_by),
+    }, hooks, sqlIn);
+    await sql`
+      update dispatch_send_jobs
+      set status = 'sent', finished_at = now(),
+          result_sent = ${result.sent}, result_skipped = ${result.skippedNoPhone}, result_configured = ${result.configured}
+      where id = ${text(job.id)}
+    `;
+    await sql`
+      insert into dispatch_day_sends (company_id, day, last_sent_at)
+      values (${text(job.company_id)}, ${isoDate(job.day)}::date, now())
+      on conflict (company_id, day) do update set last_sent_at = now()
+    `;
+    finished.push({ id: text(job.id), day: isoDate(job.day), ...result });
+  }
+  return finished;
+}
+
+async function deliverScheduled(
+  sql: Sql,
+  job: { id: string; companyId: string; day: string; createdBy: string },
+  hooks: DispatchHooks | undefined,
+  sqlIn: Sql | undefined,
+): Promise<SendResult> {
+  const configured = hooks?.notify ? true : isSmsConfigured();
+  const locations = await loadLocations(sql, job.companyId);
+  const monday = mondayOf(job.day);
+  const sunday = dispatchWeekDays(job.day)[6];
+  const placements = await loadPlacements(sql, job.companyId, monday, sunday);
+  const roster = await sql<{ user_id: string; name: string; kind: string; phone: string | null }>`
+    select r.user_id, p.name, r.kind, p.phone
+    from dispatch_roster r
+    join profiles p on p.user_id = r.user_id and p.company_id = r.company_id
+    where r.company_id = ${job.companyId}
+  `;
+  const people = roster.map((row) => ({
+    userId: text(row.user_id),
+    kind: text(row.kind) === "part" ? ("part" as const) : ("full" as const),
+    name: text(row.name),
+    phone: toE164(text(row.phone)),
+  }));
+  const resolved = resolveDay(people, placements, locations.map((row) => text(row.id)), job.day);
+  let sent = 0;
+  let skippedNoPhone = 0;
+  const dayLabel = formatDispatchDay(job.day);
+  for (const person of people) {
+    const place = resolved.find((row) => row.userId === person.userId);
+    if (!place?.locationId) continue;
+    if (!person.phone) {
+      skippedNoPhone += 1;
+      continue;
+    }
+    const location = locations.find((row) => text(row.id) === place.locationId);
+    const locationNote = await sql<{ notes: string }>`
+      select notes from dispatch_day_notes where location_id = ${place.locationId} and day = ${job.day}::date
+    `;
+    const personNote = await sql<{ notes: string }>`
+      select notes from dispatch_person_notes
+      where company_id = ${job.companyId} and user_id = ${person.userId} and day = ${job.day}::date
+    `;
+    const linked = Boolean(location?.project_id);
+    const body = dispatchMessage({
+      personName: person.name || "Crew",
+      phone: person.phone,
+      dayLabel,
+      startLabel: DISPATCH_START_LABEL,
+      locationName: location ? (linked && location.project_name ? text(location.project_name) : text(location.name)) : null,
+      locationAddress: location ? (linked ? text(location.project_address) : text(location.address)) : "",
+      locationInstruction: text(locationNote[0]?.notes),
+      personInstruction: text(personNote[0]?.notes),
+      cleared: null,
+    });
+    const id = randomUUID();
+    const subject = `Dispatch ${job.day}`;
+    await sql`
+      insert into outbound_messages (
+        id, company_id, sender_user_id, recipient_user_id, channel, to_address, subject, body, link_path, kind
+      ) values (
+        ${id}, ${job.companyId}, ${job.createdBy}, ${person.userId}, ${"sms"}, ${person.phone},
+        ${subject}, ${body}, ${"/dispatch"}, ${"dispatch"}
+      )
+    `;
+    if (hooks?.notify) {
+      await hooks.notify({ userId: person.userId, to: person.phone, body });
+      await sql`update outbound_messages set status = ${"skipped"}, error = ${"test"} where id = ${id}`;
+      sent += 1;
+    } else if (!configured) {
+      await sql`update outbound_messages set status = ${"skipped"}, error = ${"SMS not configured"} where id = ${id}`;
+    } else if (!sqlIn) {
+      try {
+        const mailer = await import("./mailer.server.ts");
+        await mailer.deliverOutbound(sql, { id, channel: "sms", to: person.phone, subject, body });
+      } catch (cause) {
+        console.warn("[dispatch] text failed", cause instanceof Error ? cause.message : "");
+      }
+      sent += 1;
+    } else {
+      await sql`update outbound_messages set status = ${"skipped"}, error = ${"test"} where id = ${id}`;
+      sent += 1;
+    }
+  }
+  return { sent: configured || hooks?.notify ? sent : 0, skippedNoPhone, configured };
+}
+

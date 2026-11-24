@@ -156,7 +156,38 @@ export function dispatchMessage(input: DispatchText): string {
   return lines.join("\n");
 }
 
-/** Rapid drops of the same person collapse to the last location. */
+/** How long Undo can cancel a send before the texts go out. */
+export const DISPATCH_SEND_DELAY_MS = 5_000;
+
+export const DISPATCH_TIME_ZONE = "America/New_York";
+
+export function todayInNewYork(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: DISPATCH_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+/** "Last sent 7:42 AM" or "Never sent", always in Eastern time. */
+export function formatLastSent(iso: string | null): string {
+  if (!iso) return "Never sent";
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: DISPATCH_TIME_ZONE,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+  return `Last sent ${time}`;
+}
+
+export function sendResultLabel(result: { sent: number; skippedNoPhone: number; configured: boolean }): string {
+  if (!result.configured) return "Texts aren't configured, so nothing was delivered.";
+  const parts: string[] = [];
+  if (result.sent) parts.push(`Sent ${result.sent}.`);
+  if (result.skippedNoPhone) parts.push(`${result.skippedNoPhone} skipped, no phone.`);
+  return parts.length ? parts.join(" ") : "No one assigned to text.";
+}
 export const DISPATCH_DRAG_SAVE_MS = 800;
 
 /** A second assignment text for the same person inside this window updates the log instead of sending again. */

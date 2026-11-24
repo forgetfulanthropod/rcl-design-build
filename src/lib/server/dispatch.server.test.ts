@@ -69,6 +69,9 @@ test("migration 0020 applied: dispatch tables exist", async () => {
     "dispatch_roster",
     "dispatch_placements",
     "dispatch_person_notes",
+    "dispatch_changes",
+    "dispatch_day_sends",
+    "dispatch_send_jobs",
   ]) {
     const rows = await sql<{ t: string }>`select to_regclass(${name})::text as t`;
     assert.equal(rows[0].t, name);
@@ -504,4 +507,76 @@ test("texts: create, update, and clear notify only that employee, and rapid move
     where company_id = ${co.companyId} and recipient_user_id = ${co.users.admin}
   `;
   assert.equal(Number(quietRows[0].n), 0);
+});
+
+test("day send: pending, undo, one text per phone, skip, unconfigured, and last sent", async () => {
+  const co = await company(1);
+  const day = "2026-11-24";
+  await dispatch.addLocation(co.users.owner, { name: "Shop", address: "1 Yard", day }, sql);
+  let board = await dispatch.getBoard(co.users.labor, { day }, sql);
+  assert.equal(board.send.pending, true);
+  assert.equal(board.send.lastSentLabel, "Never sent");
+  assert.equal(board.canEdit, false);
+
+  await assert.rejects(dispatch.scheduleDaySend(co.users.labor, { day }, sql), { name: "ForbiddenError" });
+  await assert.rejects(dispatch.scheduleDaySend(co.users.sub, { day }, sql), { name: "ForbiddenError" });
+  await assert.rejects(dispatch.undoDaySend(co.users.labor, { id: "missing" }, sql), { name: "ForbiddenError" });
+  await assert.rejects(dispatch.scheduleDaySend(co.users.owner, { day: "2026-01-01" }, sql), /Nothing new to send/);
+
+  const shop = (await dispatch.getBoard(co.users.owner, { day }, sql)).locations[0].id;
+  await sql`update profiles set phone = ${"+18595550100"} where user_id = ${co.users.labor}`;
+  await dispatch.addPerson(co.users.owner, { userId: co.users.labor, kind: "full", day, locationId: shop }, sql);
+  await dispatch.addPerson(co.users.owner, { userId: co.users.sub, kind: "part", day }, sql);
+  await dispatch.placePerson(co.users.lead, { userId: co.users.sub, day, locationId: shop }, sql);
+  await dispatch.setDayNote(co.users.admin, { locationId: shop, day, notes: "Bring the trailer." }, sql);
+  await dispatch.setPersonNote(co.users.owner, { userId: co.users.labor, day, notes: "Call first." }, sql);
+
+  const sent: { to: string; body: string }[] = [];
+  const hooks = { notify: async (notice: { to: string; body: string }) => void sent.push(notice) };
+  const job = await dispatch.scheduleDaySend(co.users.owner, { day }, sql, hooks);
+  const same = await dispatch.scheduleDaySend(co.users.admin, { day }, sql, hooks);
+  assert.equal(same.id, job.id);
+  await dispatch.undoDaySend(co.users.lead, { id: job.id }, sql);
+  assert.equal(sent.length, 0);
+  board = await dispatch.getBoard(co.users.owner, { day }, sql);
+  assert.equal(board.send.pending, true);
+  assert.equal(board.send.lastSentAt, null);
+  assert.equal(board.send.scheduled, null);
+
+  const again = await dispatch.scheduleDaySend(co.users.owner, { day }, sql, hooks);
+  await sql`update dispatch_send_jobs set send_at = now() - interval '1 second' where id = ${again.id}`;
+  await assert.rejects(dispatch.undoDaySend(co.users.owner, { id: again.id }, sql), /already went out/);
+  const claimed = await dispatch.claimDueSends(co.users.owner, { id: again.id }, sql, hooks, new Date());
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, "+18595550100");
+  assert.match(sent[0].body, /8:00 AM/);
+  assert.match(sent[0].body, /Shop/);
+  assert.match(sent[0].body, /Bring the trailer/);
+  assert.match(sent[0].body, /Call first/);
+  assert.doesNotMatch(sent[0].body, /sub person/);
+  assert.equal(claimed.jobs[0].sent, 1);
+  assert.equal(claimed.jobs[0].skippedNoPhone, 1);
+  const repeat = await dispatch.claimDueSends(co.users.owner, { id: again.id }, sql, hooks, new Date());
+  assert.equal(sent.length, 1);
+  assert.equal(repeat.jobs[0].sent, 1);
+
+  board = await dispatch.getBoard(co.users.owner, { day }, sql);
+  assert.equal(board.send.pending, false);
+  assert.match(board.send.lastSentLabel, /^Last sent /);
+  await dispatch.setPersonPhone(co.users.owner, { userId: co.users.labor, phone: "8595550188", day }, sql);
+  board = await dispatch.getBoard(co.users.sub, { day }, sql);
+  assert.equal(board.send.pending, true, "an edit after send marks the day dirty");
+
+  const quietBefore = sent.length;
+  const plain = await dispatch.scheduleDaySend(co.users.owner, { day }, sql);
+  await sql`update dispatch_send_jobs set send_at = now() - interval '1 second' where id = ${plain.id}`;
+  const unconfigured = await dispatch.claimDueSends(co.users.owner, { id: plain.id }, sql, undefined, new Date());
+  assert.equal(sent.length, quietBefore);
+  assert.equal(unconfigured.jobs[0].configured, false);
+  assert.equal(unconfigured.jobs[0].sent, 0);
+  const skipped = await sql<{ error: string }>`
+    select error from outbound_messages
+    where company_id = ${co.companyId} and subject = ${"Dispatch " + day} and error = ${"SMS not configured"}
+  `;
+  assert.ok(skipped.length >= 1);
 });
