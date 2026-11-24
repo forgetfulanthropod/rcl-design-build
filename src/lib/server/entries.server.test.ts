@@ -213,3 +213,79 @@ test("pdfFlags follows each job's effective setting (company default; a job's ov
   await sharing.setCompanySetting(co.users.owner, { key: "labor_doc_send", value: true, note: "" }, sql);
   assert.deepEqual(await entries.pdfFlags(sql, labor, reports), [true, true, false]);
 });
+
+function today(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+async function openPhoto(co: { companyId: string; users: Record<string, string> }, who: string, day = today()) {
+  const id = randomUUID();
+  const user = co.users[who];
+  await sql`
+    insert into daily_reports (id, company_id, user_id, day, narrative)
+    values (${id}, ${co.companyId}, ${user}, ${day}, ${""})
+  `;
+  const photoId = randomUUID();
+  await sql`
+    insert into daily_report_photos (id, report_id, company_id, user_id, mime, bytes, thumb, size_bytes)
+    values (${photoId}, ${id}, ${co.companyId}, ${user}, ${"image/jpeg"}, ${JPEG}, ${JPEG}, ${4})
+  `;
+  await entries.addPhotoEntry(sql, { userId: user, companyId: co.companyId, role: who }, id, photoId);
+  return { reportId: id, photoId, user };
+}
+
+test("removing a saved photo deletes the entry and the stored bytes", async () => {
+  const co = await seedCompany(sql);
+  const photo = await openPhoto(co, "labor");
+  const me = { userId: photo.user, companyId: co.companyId, role: "labor" };
+  assert.equal((await rows(sql, photo.reportId)).some((e) => e.photoId === photo.photoId), true);
+  const removed = await entries.removePhoto(sql, me, photo.photoId);
+  assert.equal(removed.day, today());
+  assert.equal((await rows(sql, photo.reportId)).some((e) => e.photoId === photo.photoId), false);
+  const stored = await sql<{ n: number }>`select count(*)::int as n from daily_report_photos where id = ${photo.photoId}`;
+  assert.equal(Number(stored[0].n), 0);
+});
+
+test("photo removal follows report edit rules for every role", async () => {
+  const co = await seedCompany(sql);
+  const laborPhoto = await openPhoto(co, "labor");
+  for (const role of ["owner", "admin", "lead", "superadmin", "sub"]) {
+    await assert.rejects(
+      entries.removePhoto(sql, { userId: co.users[role], companyId: co.companyId, role }, laborPhoto.photoId),
+      /own report/,
+      role,
+    );
+  }
+  const still = await sql<{ n: number }>`select count(*)::int as n from daily_report_photos where id = ${laborPhoto.photoId}`;
+  assert.equal(Number(still[0].n), 1, "a refused delete leaves the bytes");
+
+  const subPhoto = await openPhoto(co, "sub");
+  await entries.removePhoto(sql, { userId: subPhoto.user, companyId: co.companyId, role: "sub" }, subPhoto.photoId);
+  const gone = await sql<{ n: number }>`select count(*)::int as n from daily_report_photos where id = ${subPhoto.photoId}`;
+  assert.equal(Number(gone[0].n), 0);
+
+  await assert.rejects(
+    entries.removePhoto(sql, { userId: co.users.labor, companyId: co.companyId, role: "nobody" }, laborPhoto.photoId),
+    { name: "ForbiddenError" },
+  );
+
+  const other = await seedCompany(sql);
+  await assert.rejects(
+    entries.removePhoto(sql, { userId: other.users.labor, companyId: other.companyId, role: "labor" }, laborPhoto.photoId),
+    /Photo not found/,
+  );
+
+  await sql`update daily_reports set submitted_at = now() where id = ${laborPhoto.reportId}`;
+  await assert.rejects(
+    entries.removePhoto(sql, { userId: co.users.labor, companyId: co.companyId, role: "labor" }, laborPhoto.photoId),
+    /already submitted/,
+  );
+
+  const old = await openPhoto(co, "lead", "2020-01-02");
+  await assert.rejects(
+    entries.removePhoto(sql, { userId: old.user, companyId: co.companyId, role: "lead" }, old.photoId),
+    /only write today's report/,
+  );
+});

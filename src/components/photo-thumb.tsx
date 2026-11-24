@@ -1,7 +1,42 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { getReportPhoto } from "@/lib/server/fns";
 import { userMovedFocus } from "@/lib/focus";
+
+/** Small gold trash control. The hit area is 32px; the icon stays smaller. */
+export function PhotoRemoveButton({ onRemove }: { onRemove: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Remove photo"
+      data-testid="photo-remove"
+      className="absolute right-1 top-1 z-10 grid h-8 w-8 place-items-center rounded-full bg-black/55 text-[#c6a15b]"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onRemove();
+      }}
+    >
+      <Trash2 className="size-4" aria-hidden />
+    </button>
+  );
+}
+
+export function PhotoUndoToast({ onUndo, className = "" }: { onUndo: () => void; className?: string }) {
+  return (
+    <p
+      role="status"
+      data-testid="photo-undo"
+      className={`fixed bottom-24 left-4 z-40 flex items-center gap-3 rounded-full border border-line bg-surface px-4 py-2 text-sm shadow md:bottom-6 ${className}`}
+    >
+      Photo removed
+      <button type="button" className="h-11 rounded-full bg-[#c6a15b] px-3 text-sm font-medium text-[#1a1408]" onClick={onUndo}>
+        Undo
+      </button>
+    </p>
+  );
+}
 
 /**
  * Thumbnail that opens the full-size photo (fetched through the authenticated server fn).

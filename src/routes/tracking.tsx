@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { photoClockLabel } from "@/lib/report-entries";
 import { preparePhoto } from "@/lib/photo-prepare";
 import { WorkDayBar } from "@/components/work-day-bar";
 import { PhotoDrop } from "@/components/photo-drop";
+import { PhotoRemoveButton, PhotoUndoToast } from "@/components/photo-thumb";
+import { PHOTO_UNDO_MS } from "@/lib/photo-remove";
 import { DayExport } from "@/components/day-export";
 import { buildActivityPdf, type ActivityPdfItem } from "@/lib/activity-pdf";
 import { photoCaptionHeading } from "@/lib/photo-caption";
@@ -451,6 +453,53 @@ function TrackingPage() {
     setPhotoBusy(false);
   }
 
+  const heldPhoto = useRef<{ id: string; timer: number } | null>(null);
+  const [hiddenPhotos, setHiddenPhotos] = useState<Set<string>>(new Set());
+  const [photoUndo, setPhotoUndo] = useState(false);
+
+  function forgetPhoto(id: string) {
+    setLog((current) => {
+      const next: DayLog = {};
+      for (const [key, list] of Object.entries(current)) next[key] = list.filter((entry) => entry.id !== id);
+      saveLog(next);
+      return next;
+    });
+    setHiddenPhotos((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  function removePhotoEntry(id: string) {
+    const previous = heldPhoto.current;
+    if (previous) {
+      window.clearTimeout(previous.timer);
+      if (previous.id !== id) forgetPhoto(previous.id);
+    }
+    setHiddenPhotos((current) => new Set(current).add(id));
+    const timer = window.setTimeout(() => {
+      if (heldPhoto.current?.id === id) heldPhoto.current = null;
+      setPhotoUndo(false);
+      forgetPhoto(id);
+    }, PHOTO_UNDO_MS);
+    heldPhoto.current = { id, timer };
+    setPhotoUndo(true);
+  }
+
+  function undoPhotoRemoval() {
+    const current = heldPhoto.current;
+    if (!current) return;
+    window.clearTimeout(current.timer);
+    heldPhoto.current = null;
+    setHiddenPhotos((set) => {
+      const next = new Set(set);
+      next.delete(current.id);
+      return next;
+    });
+    setPhotoUndo(false);
+  }
+
   function setCaption(id: string, body: string) {
     const next = {
       ...log,
@@ -751,9 +800,13 @@ function TrackingPage() {
         ) : (
           entries.map((e) =>
             e.kind === "photo" ? (
+              hiddenPhotos.has(e.id) ? null : (
               <figure key={e.id} className="rounded border border-line bg-raised p-3" data-testid="photo-caption">
                 {e.project ? <p className="mb-1 text-xs text-muted">{e.project}</p> : null}
-                {e.dataUrl ? <img src={e.dataUrl} alt="" className="max-h-48 rounded" /> : null}
+                <div className="relative">
+                  {e.dataUrl ? <img src={e.dataUrl} alt="" className="max-h-48 rounded" /> : null}
+                  <PhotoRemoveButton onRemove={() => removePhotoEntry(e.id)} />
+                </div>
                 <figcaption className="mt-2">
                   <p className="text-sm font-medium tabular-nums" data-testid="photo-caption-time">
                     {photoCaptionHeading({ takenAt: e.takenAt, takenSource: e.takenSource }, clock) || "Time not recorded"}
@@ -768,6 +821,7 @@ function TrackingPage() {
                   />
                 </figcaption>
               </figure>
+              )
             ) : (
               <div key={e.id} className="rounded border border-line bg-raised p-3">
                 <div className="mb-1 text-xs text-muted">
@@ -844,6 +898,7 @@ function TrackingPage() {
         </div>
       )}
 
+      {photoUndo ? <PhotoUndoToast onUndo={undoPhotoRemoval} className="fixed bottom-28 left-4 z-40" /> : null}
       <div className="fixed bottom-6 right-6 z-50">
         <button
           type="button"

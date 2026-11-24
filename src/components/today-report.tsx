@@ -5,10 +5,11 @@ import { tooLargeMessage } from "@/lib/photo-upload";
 import { ReportPdfButton } from "@/components/report-pdf-button";
 import { PDF_OFF_HINT } from "@/lib/report-pdf-download";
 import { lunchStepScroll } from "@/lib/lunch-step";
-import { addMyPhoto, getMyReport, saveMyReport, submitMyReport } from "@/lib/server/fns";
+import { addMyPhoto, getMyReport, removeMyPhoto, saveMyReport, submitMyReport } from "@/lib/server/fns";
 import { LunchDial } from "@/components/lunch-dial";
 import { ErrorBanner, Skeleton } from "@/components/ui";
-import { PhotoThumb } from "@/components/photo-thumb";
+import { PhotoRemoveButton, PhotoThumb, PhotoUndoToast } from "@/components/photo-thumb";
+import { PHOTO_UNDO_MS } from "@/lib/photo-remove";
 import { YoureOnCard } from "@/components/crew-view";
 import { ReportWorkSessions } from "@/components/report-work-sessions";
 import { currentJobId, rememberJob } from "@/lib/use-current-job";
@@ -123,6 +124,11 @@ export function TodayReport() {
   const photoInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const saving = useRef<Promise<void>>(Promise.resolve());
+  const reportRef = useRef<Report | null>(null);
+  const dropped = useRef(new Set<string>());
+  const held = useRef<{ id: string; timer: number } | null>(null);
+  const [undoId, setUndoId] = useState<string | null>(null);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [askLunch, setAskLunch] = useState(false);
   const lunchStep = useRef<HTMLElement>(null);
   // The lunch step opens below the fold on desktop: bring it into view and put the keyboard on the dial.
@@ -144,6 +150,7 @@ export function TodayReport() {
   }, [focusKey]);
 
   function apply(next: Loaded, sent: Parameters<typeof merge>[2] = null) {
+    reportRef.current = next.report;
     setReport(next.report);
     setJobs(next.jobs);
     update((prev) => merge(prev, next.report, sent));
@@ -171,9 +178,64 @@ export function TodayReport() {
 
   const dirty = isDirty(ed);
 
+  function dropPending(key: string) {
+    dropped.current.add(key);
+    setPending((list) => list.filter((item) => item.key !== key));
+  }
+
+  function hidePhoto(id: string) {
+    setHidden((current) => new Set(current).add(id));
+  }
+
+  function showPhoto(id: string) {
+    setHidden((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  async function commitRemoval(id: string) {
+    try {
+      const next = await removeMyPhoto({ data: { id } });
+      showPhoto(id);
+      apply(next);
+    } catch (cause) {
+      showPhoto(id);
+      setError(cause instanceof Error ? cause.message : "Could not remove that photo.");
+    }
+  }
+
+  function removeSaved(id: string) {
+    const previous = held.current;
+    if (previous) {
+      window.clearTimeout(previous.timer);
+      if (previous.id !== id) void commitRemoval(previous.id);
+    }
+    hidePhoto(id);
+    const timer = window.setTimeout(() => {
+      if (held.current?.id === id) held.current = null;
+      setUndoId((current) => (current === id ? null : current));
+      void commitRemoval(id);
+    }, PHOTO_UNDO_MS);
+    held.current = { id, timer };
+    setUndoId(id);
+  }
+
+  function undoRemoval() {
+    const current = held.current;
+    if (!current) return;
+    window.clearTimeout(current.timer);
+    held.current = null;
+    showPhoto(current.id);
+    setUndoId(null);
+  }
+
   async function upload(file: File, key: string) {
+    const known = new Set((reportRef.current?.photos ?? []).map((photo) => photo.id));
     try {
       const photo = await preparePhoto(file);
+      if (dropped.current.has(key)) return;
       const next = await addMyPhoto({
         data: {
           day,
@@ -186,9 +248,15 @@ export function TodayReport() {
           takenSource: photo.takenSource ?? "",
         },
       });
+      if (dropped.current.has(key)) {
+        const added = next.report.photos.find((item) => !known.has(item.id));
+        if (added) apply(await removeMyPhoto({ data: { id: added.id } }));
+        return;
+      }
       setPending((list) => list.filter((p) => p.key !== key));
       apply(next);
     } catch (cause) {
+      if (dropped.current.has(key)) return;
       setPending((list) => list.map((p) => (p.key === key ? { ...p, state: "failed" } : p)));
       setError(cause instanceof Error ? cause.message : "Upload failed. Tap the photo to retry.");
     }
@@ -251,7 +319,7 @@ export function TodayReport() {
     return error ? <ErrorBanner message={error} /> : <Skeleton lines={5} label="Opening today's report" />;
   }
   const submitted = Boolean(report.submittedAt);
-  const photos = report.photos.length;
+  const photos = report.photos.filter((photo) => !hidden.has(photo.id)).length;
   const thumbs = new Map(report.photos.map((p) => [p.id, p.thumb]));
   const takenAt = new Map(report.photos.map((p) => [p.id, p.takenAt]));
   const fileTime = new Map(report.photos.map((p) => [p.id, p.fileTime]));
@@ -263,11 +331,13 @@ export function TodayReport() {
     | { type: "draft"; key: string; body: string }
     | { type: "pending"; key: string; pending: Pending };
   const rows: Row[] = [
-    ...sortEntries(report.entries).map((entry) => ({
-      type: "entry" as const,
-      key: entry.kind === "text" ? (ed.keyOf[entry.id] ?? entry.id) : entry.id,
-      entry,
-    })),
+    ...sortEntries(report.entries)
+      .filter((entry) => entry.kind !== "photo" || !hidden.has(entry.photoId ?? ""))
+      .map((entry) => ({
+        type: "entry" as const,
+        key: entry.kind === "text" ? (ed.keyOf[entry.id] ?? entry.id) : entry.id,
+        entry,
+      })),
     ...pending.map((p) => ({ type: "pending" as const, key: p.key, pending: p })),
     ...ed.drafts.map((d) => ({ type: "draft" as const, key: d.key, body: d.body })),
   ];
@@ -291,6 +361,7 @@ export function TodayReport() {
 
   return (
     <div className="mx-auto grid max-w-xl gap-4" data-testid="today-report">
+      {undoId ? <PhotoUndoToast onUndo={undoRemoval} /> : null}
       <YoureOnCard />
       <ReportWorkSessions day={day} jobs={jobs} />
       <section className="rounded-md border border-line bg-surface p-4">
@@ -341,21 +412,24 @@ export function TodayReport() {
               return (
                 <li key={row.key} data-testid="entry" data-kind="photo" data-pending="true">
                   <p className="text-sm text-muted tabular-nums">{clock(p.addedAt)}</p>
-                  <button
-                    type="button"
-                    className="relative mt-1 block w-40"
-                    disabled={p.state === "uploading"}
-                    aria-label={p.state === "failed" ? "Upload failed, tap to retry" : "Uploading photo"}
-                    onClick={() => {
-                      setPending((list) => list.map((x) => (x.key === p.key ? { ...x, state: "uploading" } : x)));
-                      void upload(p.file, p.key);
-                    }}
-                  >
-                    <img src={p.preview} alt="" className="aspect-square w-full rounded-md object-cover opacity-50" />
-                    <span className="absolute inset-0 grid place-items-center text-sm font-medium text-fg">
-                      {p.state === "failed" ? "⟳ Retry" : "Uploading…"}
-                    </span>
-                  </button>
+                  <div className="relative mt-1 w-40">
+                    <button
+                      type="button"
+                      className="block w-full"
+                      disabled={p.state === "uploading"}
+                      aria-label={p.state === "failed" ? "Upload failed, tap to retry" : "Uploading photo"}
+                      onClick={() => {
+                        setPending((list) => list.map((x) => (x.key === p.key ? { ...x, state: "uploading" } : x)));
+                        void upload(p.file, p.key);
+                      }}
+                    >
+                      <img src={p.preview} alt="" className="aspect-square w-full rounded-md object-cover opacity-50" />
+                      <span className="absolute inset-0 grid place-items-center text-sm font-medium text-fg">
+                        {p.state === "failed" ? "⟳ Retry" : "Uploading…"}
+                      </span>
+                    </button>
+                    <PhotoRemoveButton onRemove={() => dropPending(p.key)} />
+                  </div>
                 </li>
               );
             }
@@ -386,8 +460,9 @@ export function TodayReport() {
                     update((prev) => ({ ...prev, texts: { ...prev.texts, [e.id]: v } })),
                   )
                 ) : (
-                  <div className="mt-1 w-40">
+                  <div className="relative mt-1 w-40">
                     <PhotoThumb id={e.photoId ?? ""} thumb={thumbs.get(e.photoId ?? "") ?? ""} alt={`Work photo ${clock(e.createdAt)}`} />
+                    {!submitted && e.photoId ? <PhotoRemoveButton onRemove={() => removeSaved(e.photoId ?? "")} /> : null}
                   </div>
                 )}
               </li>
