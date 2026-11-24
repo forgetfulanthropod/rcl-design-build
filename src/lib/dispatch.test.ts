@@ -17,6 +17,7 @@ import {
   type RosterPerson,
 } from "./dispatch.ts";
 import { weekStart } from "./crew.ts";
+import { formatPhone } from "./roles.ts";
 
 const people: RosterPerson[] = [
   { userId: "ft", kind: "full" },
@@ -88,6 +89,28 @@ test("an archived location leaves the person unassigned instead of hiding them",
   assert.equal(tue.find((p) => p.userId === "pt")?.locationId, null);
 });
 
+test("a full-timer placed mid-week also shows on Monday of that week", () => {
+  const onlyTuesday: PlacementRow[] = [
+    { userId: "ft", day: "2026-11-24", locationId: "a", kind: "full" },
+  ];
+  const monday = resolveDay(people, onlyTuesday, locs, "2026-11-23");
+  assert.equal(monday.find((p) => p.userId === "ft")?.locationId, "a");
+  assert.equal(monday.find((p) => p.userId === "ft")?.carried, true);
+  const wednesday = resolveDay(people, onlyTuesday, locs, "2026-11-25");
+  assert.equal(wednesday.find((p) => p.userId === "ft")?.locationId, "a");
+  // The previous week is not backfilled.
+  const priorSunday = resolveDay(people, onlyTuesday, locs, "2026-11-22");
+  assert.equal(priorSunday.find((p) => p.userId === "ft")?.locationId, null);
+  // A placement from the previous week still wins over same-week backfill.
+  const withPrior: PlacementRow[] = [
+    { userId: "ft", day: "2026-11-20", locationId: "b", kind: "full" },
+    { userId: "ft", day: "2026-11-24", locationId: "a", kind: "full" },
+  ];
+  const mondayPrior = resolveDay(people, withPrior, locs, "2026-11-23");
+  assert.equal(mondayPrior.find((p) => p.userId === "ft")?.locationId, "b");
+  assert.equal(mondayPrior.find((p) => p.userId === "ft")?.carried, true);
+});
+
 test("a full-time person with no placement yet is unassigned", () => {
   const day = resolveDay([{ userId: "new", kind: "full" }], [], locs, "2026-11-02");
   assert.deepEqual(day[0], { userId: "new", kind: "full", locationId: null, carried: false });
@@ -100,6 +123,12 @@ test("drops: part-time can return to the pool; full-time only moves between loca
   assert.equal(placementForDrop("part", null), null);
   assert.deepEqual(placementForDrop("full", "loc-1"), { locationId: "loc-1" });
   assert.deepEqual(placementForDrop("part", "loc-1"), { locationId: "loc-1" });
+});
+
+test("phone numbers display as +1 859-555-0100", () => {
+  assert.equal(formatPhone("+18595550100"), "+1 859-555-0100");
+  assert.equal(formatPhone("8595550199"), "+1 859-555-0199");
+  assert.equal(formatPhone("(859) 555-0100"), "+1 859-555-0100");
 });
 
 test("phone numbers normalize to E.164", () => {
@@ -151,8 +180,14 @@ test("a dispatch text names one person, their number, and only their instruction
 test("last sent is Eastern time, or never", () => {
   assert.equal(formatLastSent(null), "Never sent");
   assert.equal(formatLastSent("2026-11-24T12:42:00.000Z"), "Last sent 7:42 AM");
-  assert.equal(sendResultLabel({ sent: 2, skippedNoPhone: 1, configured: true }), "Sent 2. 1 skipped, no phone.");
-  assert.match(sendResultLabel({ sent: 0, skippedNoPhone: 0, configured: false }), /aren't configured/);
+  assert.equal(
+    sendResultLabel({ sent: 2, skippedNoPhone: 1, configured: true }),
+    "Sent 2. 1 skipped, no phone.",
+  );
+  assert.match(
+    sendResultLabel({ sent: 0, skippedNoPhone: 0, configured: false }),
+    /aren't configured/,
+  );
 });
 
 test("rapid drags keep only the last location", async () => {

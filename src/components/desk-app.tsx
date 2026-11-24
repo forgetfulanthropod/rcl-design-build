@@ -182,7 +182,9 @@ export function DeskApp({ children }: { children?: ReactNode }) {
         <header className="flex min-w-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="truncate font-display text-2xl">{label}</p>
-            <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
+            {current !== "dispatch" ? (
+              <p className="hidden truncate text-sm text-muted md:block">{ready.copy.tagline}</p>
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-1 sm:gap-2">
             {canTeam ? (
@@ -205,14 +207,19 @@ export function DeskApp({ children }: { children?: ReactNode }) {
                 className={`relative inline-flex min-h-11 items-center gap-1 rounded-md px-2 text-sm ${current === "settings" ? "text-copper" : "text-muted"}`}
               >
                 <Settings className="size-4" aria-hidden="true" /> <span className="hidden sm:inline">Settings</span>
-                {reviewBadge ? (
+                {reviewBadge && current !== "dispatch" ? (
                   <span className="ml-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-copper px-1 text-xs font-semibold text-ink" data-testid="settings-badge">
                     {reviewBadge}
                   </span>
                 ) : null}
+                {reviewBadge && current === "dispatch" ? (
+                  <span className="text-xs text-muted" data-testid="settings-reviews">
+                    {reviewBadge} sharing {reviewBadge === 1 ? "review" : "reviews"}
+                  </span>
+                ) : null}
               </button>
             ) : null}
-            <UserButton roleLabel={roleLabel(ready.profile.role)} />
+            <UserButton roleLabel={roleLabel(ready.profile.role)} hideInitial={current === "dispatch"} />
           </div>
         </header>
         <OfflineBadge online={online} />
