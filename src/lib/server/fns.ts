@@ -1030,6 +1030,133 @@ export const getYoureOn = createServerFn({ method: "GET" })
     return run(context.userId);
   });
 
+// ---- Dispatch (/dispatch, URL only). Permissions checked in dispatch.server. ----
+
+function dispatchDay(value: unknown): string {
+  const day = optional(value, 10);
+  if (!day) return "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error("Pick a day.");
+  return day;
+}
+
+export const getDispatch = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((input: { day?: string } = {}) => ({ day: dispatchDay(input?.day) || undefined }))
+  .handler(async ({ context, data }) => {
+    const { getBoard } = await import("./dispatch.server");
+    return getBoard(context.userId, data);
+  });
+
+export const addDispatchLocation = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId?: string; name?: string; address?: string; notes?: string }) => ({
+    projectId: optional(input?.projectId, 80) || null,
+    name: optional(input?.name, 120),
+    address: optional(input?.address, 160),
+    notes: optional(input?.notes, 800),
+  }))
+  .handler(async ({ context, data }) => {
+    const { addLocation } = await import("./dispatch.server");
+    return addLocation(context.userId, data);
+  });
+
+export const updateDispatchLocation = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { id: string; name?: string; address?: string; notes?: string; archived?: boolean }) => ({
+    id: required(input?.id, 80, "Location"),
+    name: input?.name === undefined ? undefined : optional(input.name, 120),
+    address: input?.address === undefined ? undefined : optional(input.address, 160),
+    notes: input?.notes === undefined ? undefined : optional(input.notes, 800),
+    archived: input?.archived === true,
+  }))
+  .handler(async ({ context, data }) => {
+    const { updateLocation } = await import("./dispatch.server");
+    return updateLocation(context.userId, data);
+  });
+
+export const setDispatchDayNote = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { locationId: string; day: string; notes?: string }) => ({
+    locationId: required(input?.locationId, 80, "Location"),
+    day: dayArg(input?.day),
+    notes: optional(input?.notes, 800),
+  }))
+  .handler(async ({ context, data }) => {
+    const { setDayNote } = await import("./dispatch.server");
+    return setDayNote(context.userId, data);
+  });
+
+export const addDispatchPerson = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; kind: string; day: string; locationId?: string | null }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    kind: input?.kind === "part" ? "part" : input?.kind === "full" ? "full" : "",
+    day: dayArg(input?.day),
+    locationId: optional(input?.locationId, 80) || null,
+  }))
+  .handler(async ({ context, data }) => {
+    const { addPerson } = await import("./dispatch.server");
+    if (data.kind !== "full" && data.kind !== "part") throw new Error("Pick full-time or part-time.");
+    return addPerson(context.userId, data);
+  });
+
+export const setDispatchPersonKind = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; kind: string; day: string; locationId?: string | null }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    kind: input?.kind === "part" ? "part" : input?.kind === "full" ? "full" : "",
+    day: dayArg(input?.day),
+    locationId: optional(input?.locationId, 80) || null,
+  }))
+  .handler(async ({ context, data }) => {
+    const { setPersonKind } = await import("./dispatch.server");
+    if (data.kind !== "full" && data.kind !== "part") throw new Error("Pick full-time or part-time.");
+    return setPersonKind(context.userId, data);
+  });
+
+export const placeDispatch = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; day: string; locationId?: string | null }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    day: dayArg(input?.day),
+    locationId: optional(input?.locationId, 80) || null,
+  }))
+  .handler(async ({ context, data }) => {
+    const { placePerson } = await import("./dispatch.server");
+    return placePerson(context.userId, data);
+  });
+
+export const removeDispatchPerson = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string }) => ({ userId: required(input?.userId, 80, "Person") }))
+  .handler(async ({ context, data }) => {
+    const { removePerson } = await import("./dispatch.server");
+    return removePerson(context.userId, data);
+  });
+
+export const setDispatchPersonNote = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; day: string; notes?: string }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    day: dayArg(input?.day),
+    notes: optional(input?.notes, 800),
+  }))
+  .handler(async ({ context, data }) => {
+    const { setPersonNote } = await import("./dispatch.server");
+    return setPersonNote(context.userId, data);
+  });
+
+export const setDispatchPhone = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { userId: string; phone?: string }) => ({
+    userId: required(input?.userId, 80, "Person"),
+    phone: optional(input?.phone, 24),
+  }))
+  .handler(async ({ context, data }) => {
+    const { setPersonPhone } = await import("./dispatch.server");
+    return setPersonPhone(context.userId, data);
+  });
+
 function shareToken(value: unknown): string {
   const token = required(value, 80, "Link");
   if (!/^[A-Za-z0-9_-]{20,80}$/.test(token)) throw new Error("This link is not available.");

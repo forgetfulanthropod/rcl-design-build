@@ -28,7 +28,7 @@ test("deep links: a page that isn't on the desk is refused per role", () => {
   assert.equal(canOpen("owner", "attention"), true);
   assert.equal(canOpen("owner", "team"), true);
   assert.equal(canOpen("labor", "today"), true);
-  assert.deepEqual(viewsFor("sub"), ["today", "mine", "docs"]);
+  assert.deepEqual(viewsFor("sub"), ["today", "mine", "docs", "dispatch"]);
 });
 
 test("deep links: titles read '<Record> · <View> · RCL'", () => {
@@ -81,4 +81,14 @@ test("deep links: Crew (spec 01) and Sharing settings (spec 06) have URLs, for t
   assert.equal(pageTitle("crew"), "Crew · RCL");
   assert.deepEqual(deskRedirect("labor", "/crew", true), { to: "/today", notice: NOT_ON_DESK });
   assert.deepEqual(deskRedirect("lead", "/settings", true), { to: "/today", notice: NOT_ON_DESK });
+});
+
+test("dispatch is a URL every role can open, and it is not a nav item", () => {
+  assert.equal(viewForPath("/dispatch"), "dispatch");
+  assert.equal(pageTitle("dispatch"), "Dispatch · RCL");
+  for (const role of ["owner", "admin", "lead", "labor", "sub"]) {
+    assert.equal(canOpen(role, "dispatch"), true, role);
+    assert.equal(deskRedirect(role, "/dispatch", true), null, role);
+  }
+  assert.equal(deskRedirect("labor", "/dispatch", false), null);
 });

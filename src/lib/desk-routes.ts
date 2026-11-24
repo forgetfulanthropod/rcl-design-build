@@ -5,7 +5,7 @@
 import { can, navFor, type NavId } from "./permissions.ts";
 import { safeRedirect } from "./sign-in-complete.ts";
 
-export type DeskView = NavId | "team" | "settings";
+export type DeskView = NavId | "team" | "settings" | "dispatch";
 
 export const VIEW_PATH: Record<DeskView, string> = {
   today: "/today",
@@ -18,6 +18,7 @@ export const VIEW_PATH: Record<DeskView, string> = {
   docs: "/docs",
   team: "/team",
   settings: "/settings",
+  dispatch: "/dispatch",
 };
 
 export const VIEW_LABEL: Record<DeskView, string> = {
@@ -31,6 +32,7 @@ export const VIEW_LABEL: Record<DeskView, string> = {
   docs: "Docs",
   team: "Team",
   settings: "Sharing settings",
+  dispatch: "Dispatch",
 };
 
 /** The desk view a path belongs to ("/docs/abc" → "docs"), or null for non-desk paths. */
@@ -45,6 +47,8 @@ export function viewsFor(role: string): DeskView[] {
   const views: DeskView[] = [...navFor(role)];
   if (can(role, "crew.invite")) views.push("team");
   if (can(role, "settings.sharing.view")) views.push("settings");
+  // URL only. navFor never includes it, so the sidebar and the bottom bar stay unchanged.
+  if (can(role, "dispatch.view")) views.push("dispatch");
   return views;
 }
 

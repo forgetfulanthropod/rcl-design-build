@@ -247,6 +247,7 @@ test("migration 0014 flags every existing job, archived included, and re-running
     "0017_report_entries.sql",
     "0018_work_sessions.sql",
     "0019_activity_shares.sql",
+    "0020_dispatch.sql",
   ]);
   const rows = await db<{ project_id: string; s: string; by: string }>`
     select project_id, sharing_review_status as s, review_requested_by as by from project_settings order by project_id
