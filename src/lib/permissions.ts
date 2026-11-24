@@ -47,6 +47,8 @@ export const ACTIONS = [
   "session.write", // log and edit my own work sessions
   "session.review", // see other people's sessions in the company
   "session.manage", // correct someone else's session
+  "dispatch.view", // open /dispatch (URL only; not in the nav)
+  "dispatch.edit", // locations, roster, placements, day instructions
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 
@@ -54,7 +56,7 @@ const ALL = new Set<Action>(ACTIONS);
 const without = (...drop: Action[]) => new Set<Action>(ACTIONS.filter((a) => !drop.includes(a)));
 // Field roles read documents; creating them (RFIs included) is the lead's job (spec 05 · F2c).
 // doc.send is not in LABOR: Labor sends only where "Labor can send documents" is on (spec 06).
-const FIELD = new Set<Action>(["log.create", "workorder.updateOwn", "report.write", "doc.view", "crew.myWeek", "session.write"]);
+const FIELD = new Set<Action>(["log.create", "workorder.updateOwn", "report.write", "doc.view", "crew.myWeek", "session.write", "dispatch.view"]);
 const LABOR = new Set<Action>([...FIELD, "activity.add", "activity.edit", "safety.write"]);
 
 const MATRIX: Record<Role, Set<Action>> = {
@@ -81,6 +83,8 @@ const MATRIX: Record<Role, Set<Action>> = {
     "report.write",
     "session.write",
     "session.review",
+    "dispatch.view",
+    "dispatch.edit",
     "activity.add",
     "activity.edit",
     "activity.approve",

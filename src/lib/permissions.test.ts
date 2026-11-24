@@ -72,6 +72,15 @@ test("crew board actions: Owner/Admin/Lead assign; Labor/Sub only myWeek", () =>
   for (const r of ROLES) assert.equal(can(r, "crew.myWeek"), true, r);
 });
 
+test("dispatch: every role can open it; lead and up can edit; it stays out of the nav", () => {
+  for (const r of ROLES) assert.equal(can(r, "dispatch.view"), true, r);
+  for (const r of ["superadmin", "owner", "admin", "lead"]) assert.equal(can(r, "dispatch.edit"), true, r);
+  for (const r of ["labor", "sub", "field"]) assert.equal(can(r, "dispatch.edit"), false, r);
+  assert.throws(() => assertCan("labor", "dispatch.edit"), /dispatch\.edit/);
+  assert.throws(() => assertCan("sub", "dispatch.edit"), /dispatch\.edit/);
+  for (const r of ROLES) assert.equal(navFor(r).includes("dispatch" as never), false, r);
+});
+
 test("invitable roles", () => {
   assert.deepEqual(invitableRoles("labor"), []);
   assert.ok(!invitableRoles("admin").includes("admin"));

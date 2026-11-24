@@ -16,6 +16,7 @@ import { Route as DeskIndexRouteImport } from './routes/_desk.index'
 import { Route as DeskActivitiesRouteImport } from './routes/_desk.activities'
 import { Route as DeskAttentionRouteImport } from './routes/_desk.attention'
 import { Route as DeskCrewRouteImport } from './routes/_desk.crew'
+import { Route as DeskDispatchRouteImport } from './routes/_desk.dispatch'
 import { Route as DeskMineRouteImport } from './routes/_desk.mine'
 import { Route as DeskSafetyRouteImport } from './routes/_desk.safety'
 import { Route as DeskSettingsRouteImport } from './routes/_desk.settings'
@@ -62,6 +63,11 @@ const DeskAttentionRoute = DeskAttentionRouteImport.update({
 const DeskCrewRoute = DeskCrewRouteImport.update({
   id: '/crew',
   path: '/crew',
+  getParentRoute: () => DeskRoute,
+} as any)
+const DeskDispatchRoute = DeskDispatchRouteImport.update({
+  id: '/dispatch',
+  path: '/dispatch',
   getParentRoute: () => DeskRoute,
 } as any)
 const DeskMineRoute = DeskMineRouteImport.update({
@@ -137,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/activities': typeof DeskActivitiesRoute
   '/attention': typeof DeskAttentionRoute
   '/crew': typeof DeskCrewRoute
+  '/dispatch': typeof DeskDispatchRoute
   '/mine': typeof DeskMineRoute
   '/safety': typeof DeskSafetyRoute
   '/settings': typeof DeskSettingsRoute
@@ -157,6 +164,7 @@ export interface FileRoutesByTo {
   '/activities': typeof DeskActivitiesRoute
   '/attention': typeof DeskAttentionRoute
   '/crew': typeof DeskCrewRoute
+  '/dispatch': typeof DeskDispatchRoute
   '/mine': typeof DeskMineRoute
   '/safety': typeof DeskSafetyRoute
   '/settings': typeof DeskSettingsRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/_desk/activities': typeof DeskActivitiesRoute
   '/_desk/attention': typeof DeskAttentionRoute
   '/_desk/crew': typeof DeskCrewRoute
+  '/_desk/dispatch': typeof DeskDispatchRoute
   '/_desk/mine': typeof DeskMineRoute
   '/_desk/safety': typeof DeskSafetyRoute
   '/_desk/settings': typeof DeskSettingsRoute
@@ -204,6 +213,7 @@ export interface FileRouteTypes {
     | '/activities'
     | '/attention'
     | '/crew'
+    | '/dispatch'
     | '/mine'
     | '/safety'
     | '/settings'
@@ -224,6 +234,7 @@ export interface FileRouteTypes {
     | '/activities'
     | '/attention'
     | '/crew'
+    | '/dispatch'
     | '/mine'
     | '/safety'
     | '/settings'
@@ -246,6 +257,7 @@ export interface FileRouteTypes {
     | '/_desk/activities'
     | '/_desk/attention'
     | '/_desk/crew'
+    | '/_desk/dispatch'
     | '/_desk/mine'
     | '/_desk/safety'
     | '/_desk/settings'
@@ -321,6 +333,13 @@ declare module '@tanstack/react-router' {
       path: '/crew'
       fullPath: '/crew'
       preLoaderRoute: typeof DeskCrewRouteImport
+      parentRoute: typeof DeskRoute
+    }
+    '/_desk/dispatch': {
+      id: '/_desk/dispatch'
+      path: '/dispatch'
+      fullPath: '/dispatch'
+      preLoaderRoute: typeof DeskDispatchRouteImport
       parentRoute: typeof DeskRoute
     }
     '/_desk/mine': {
@@ -421,6 +440,7 @@ interface DeskRouteChildren {
   DeskActivitiesRoute: typeof DeskActivitiesRoute
   DeskAttentionRoute: typeof DeskAttentionRoute
   DeskCrewRoute: typeof DeskCrewRoute
+  DeskDispatchRoute: typeof DeskDispatchRoute
   DeskMineRoute: typeof DeskMineRoute
   DeskSafetyRoute: typeof DeskSafetyRoute
   DeskSettingsRoute: typeof DeskSettingsRoute
@@ -437,6 +457,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskActivitiesRoute: DeskActivitiesRoute,
   DeskAttentionRoute: DeskAttentionRoute,
   DeskCrewRoute: DeskCrewRoute,
+  DeskDispatchRoute: DeskDispatchRoute,
   DeskMineRoute: DeskMineRoute,
   DeskSafetyRoute: DeskSafetyRoute,
   DeskSettingsRoute: DeskSettingsRoute,
