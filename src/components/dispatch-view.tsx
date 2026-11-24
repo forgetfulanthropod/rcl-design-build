@@ -5,7 +5,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, GripVertical, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Info, MoreHorizontal, Send } from "lucide-react";
 import {
   addDispatchLocation,
   addDispatchPerson,
@@ -30,6 +30,7 @@ import {
   DISPATCH_DRAG_SAVE_MS,
   createDragGate,
   formatDispatchDay,
+  formatDispatchDayShort,
   formatDispatchWeek,
   kindLabel,
   placementForDrop,
@@ -40,6 +41,11 @@ import {
 type Board = Awaited<ReturnType<typeof getDispatch>>;
 type Person = Board["people"][number];
 type Placement = Board["daysPlaced"][number]["placements"][number];
+
+const GOLD = "bg-[#c6a15b] text-[#1a1408]";
+const BLUE = "text-[#6ea8d4]";
+
+type HeldAction = { token: string; label: string; commit: () => Promise<unknown> };
 
 type Ghost = {
   userId: string;
@@ -68,12 +74,21 @@ function NoteField({
 }) {
   const [text, setText] = useState(value);
   const [saved, setSaved] = useState(false);
+  const area = useRef<HTMLTextAreaElement>(null);
   useEffect(() => setText(value), [value]);
+  useEffect(() => {
+    const node = area.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.max(node.scrollHeight, 44)}px`;
+  }, [text]);
   return (
     <label className="grid gap-1 text-sm text-muted">
       {label}
       <textarea
-        className="field"
+        ref={area}
+        rows={1}
+        className="field min-h-11 resize-y overflow-hidden"
         maxLength={800}
         data-testid={testId}
         value={text}
@@ -88,7 +103,7 @@ function NoteField({
             .catch(() => setSaved(false));
         }}
       />
-      {saved ? <span className="text-xs text-pine">Saved</span> : null}
+      {saved ? <span className="text-xs text-[#8fbfa4]">Saved</span> : null}
     </label>
   );
 }
@@ -147,10 +162,13 @@ function SendDock({
   return (
     <>
       <div
-        className="fixed bottom-24 right-4 z-30 flex flex-col items-end gap-2 md:bottom-6"
+        className="flex shrink-0 flex-col items-end gap-2 pt-2"
         data-testid="dispatch-send-dock"
       >
-        <p className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-muted shadow" data-testid="dispatch-last-sent">
+        <p
+          className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-muted shadow"
+          data-testid="dispatch-last-sent"
+        >
           {send.lastSentLabel}
         </p>
         {undoOpen ? (
@@ -162,7 +180,9 @@ function SendDock({
               if (!scheduled) return;
               void undoDispatchSend({ data: { id: scheduled.id } })
                 .then(() => onRefresh())
-                .catch((cause: unknown) => setToast(cause instanceof Error ? cause.message : "Could not undo."));
+                .catch((cause: unknown) =>
+                  setToast(cause instanceof Error ? cause.message : "Could not undo."),
+                );
             }}
           >
             Undo
@@ -180,7 +200,9 @@ function SendDock({
             if (!enabled) return;
             void sendDispatchDay({ data: { day } })
               .then(() => onRefresh())
-              .catch((cause: unknown) => setToast(cause instanceof Error ? cause.message : "Could not send."));
+              .catch((cause: unknown) =>
+                setToast(cause instanceof Error ? cause.message : "Could not send."),
+              );
           }}
         >
           <Send className="size-6" aria-hidden />
@@ -211,6 +233,7 @@ export function DispatchView() {
   const [addingPerson, setAddingPerson] = useState(false);
   const [menu, setMenu] = useState<string | null>(null);
   const [ghost, setGhost] = useState<Ghost | null>(null);
+  const [held, setHeld] = useState<HeldAction | null>(null);
   const [queued, setQueued] = useState(0);
   const dragCleanup = useRef<(() => void) | null>(null);
   const gates = useRef(new Map<string, ReturnType<typeof createDragGate>>());
@@ -227,6 +250,15 @@ export function DispatchView() {
   }, [load]);
 
   useEffect(() => () => dragCleanup.current?.(), []);
+  useEffect(() => {
+    if (!held) return;
+    const job = held;
+    const timer = window.setTimeout(() => {
+      setHeld((current) => (current?.token === job.token ? null : current));
+      void job.commit();
+    }, 5_000);
+    return () => window.clearTimeout(timer);
+  }, [held]);
 
   const canEdit = board ? board.canEdit : can(role, "dispatch.edit");
   const showing = board && board.day === day ? board : null;
@@ -327,10 +359,49 @@ export function DispatchView() {
   const step = mode === "week" ? 7 : 1;
 
   return (
-    <div className="grid min-w-0 gap-4" data-testid="dispatch-view" data-pending={queued > 0 ? "true" : "false"}>
-      <div className="flex flex-wrap items-center gap-2">
+    <div
+      className="flex h-[calc(100dvh-11rem)] min-h-0 min-w-0 flex-col md:h-[calc(100dvh-6.75rem)]"
+      data-testid="dispatch-view"
+      data-pending={queued > 0 ? "true" : "false"}
+    >
+      <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto pb-2" data-testid="dispatch-scroll">
+      <div className="grid gap-2">
+        <div className="flex items-center gap-2 md:hidden">
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
+            aria-label={mode === "week" ? "Previous week" : "Previous day"}
+            onClick={() => setDay((current) => addDays(current, -step))}
+          >
+            <ChevronLeft className="size-5" aria-hidden />
+          </button>
+          <p
+            className="min-w-0 flex-1 truncate text-center text-base"
+            data-testid="dispatch-when-short"
+          >
+            {mode === "week" ? formatDispatchWeek(weekStart(day)) : formatDispatchDayShort(day)}
+          </p>
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
+            aria-label={mode === "week" ? "Next week" : "Next day"}
+            onClick={() => setDay((current) => addDays(current, step))}
+          >
+            <ChevronRight className="size-5" aria-hidden />
+          </button>
+          <span className="text-muted" aria-hidden>
+            ·
+          </span>
+          <button
+            type="button"
+            className="h-11 shrink-0 rounded-md border border-line px-3 text-sm"
+            onClick={() => setDay(todayIso())}
+          >
+            Today
+          </button>
+        </div>
         <div
-          className="flex rounded-md border border-line p-1"
+          className="flex w-full rounded-md border border-line p-1 md:hidden"
           role="tablist"
           aria-label="Dispatch view"
         >
@@ -340,40 +411,61 @@ export function DispatchView() {
               type="button"
               role="tab"
               aria-selected={mode === id}
-              data-testid={`dispatch-tab-${id}`}
-              className={`h-11 rounded-md px-4 text-sm font-medium ${mode === id ? "bg-copper text-ink" : "text-muted"}`}
+              data-testid={`dispatch-tab-${id}-mobile`}
+              className={`h-11 flex-1 rounded-md text-sm font-medium ${mode === id ? GOLD : "text-muted"}`}
               onClick={() => setMode(id)}
             >
               {id === "day" ? "Day" : "Week"}
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
-          aria-label={mode === "week" ? "Previous week" : "Previous day"}
-          onClick={() => setDay((current) => addDays(current, -step))}
-        >
-          <ChevronLeft className="size-5" aria-hidden />
-        </button>
-        <p className="min-w-[10rem] text-center font-display text-lg" data-testid="dispatch-when">
-          {mode === "week" ? formatDispatchWeek(weekStart(day)) : formatDispatchDay(day)}
-        </p>
-        <button
-          type="button"
-          className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
-          aria-label={mode === "week" ? "Next week" : "Next day"}
-          onClick={() => setDay((current) => addDays(current, step))}
-        >
-          <ChevronRight className="size-5" aria-hidden />
-        </button>
-        <button
-          type="button"
-          className="h-11 rounded-md border border-line px-3 text-sm"
-          onClick={() => setDay(todayIso())}
-        >
-          Today
-        </button>
+        <div className="hidden flex-wrap items-center gap-2 md:flex">
+          <div
+            className="flex rounded-md border border-line p-1"
+            role="tablist"
+            aria-label="Dispatch view"
+          >
+            {(["day", "week"] as const).map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={mode === id}
+                data-testid={`dispatch-tab-${id}`}
+                className={`h-11 rounded-md px-4 text-sm font-medium ${mode === id ? GOLD : "text-muted"}`}
+                onClick={() => setMode(id)}
+              >
+                {id === "day" ? "Day" : "Week"}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
+            aria-label={mode === "week" ? "Previous week" : "Previous day"}
+            onClick={() => setDay((current) => addDays(current, -step))}
+          >
+            <ChevronLeft className="size-5" aria-hidden />
+          </button>
+          <p className="min-w-[10rem] text-center font-display text-lg" data-testid="dispatch-when">
+            {mode === "week" ? formatDispatchWeek(weekStart(day)) : formatDispatchDay(day)}
+          </p>
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
+            aria-label={mode === "week" ? "Next week" : "Next day"}
+            onClick={() => setDay((current) => addDays(current, step))}
+          >
+            <ChevronRight className="size-5" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className="h-11 rounded-md border border-line px-3 text-sm"
+            onClick={() => setDay(todayIso())}
+          >
+            Today
+          </button>
+        </div>
         {showing && !showing.canEdit ? (
           <p className="text-sm text-muted" data-testid="dispatch-readonly">
             View only
@@ -424,12 +516,19 @@ export function DispatchView() {
             setMenu(null);
             void run(() => removeDispatchPerson({ data: { userId } }), "Could not remove them.");
           }}
-          onRemoveLocation={(id) =>
-            void run(
-              () => updateDispatchLocation({ data: { id, archived: true, day } }),
-              "Could not remove that location.",
-            )
-          }
+          onRemoveLocation={(id) => {
+            const name =
+              showing?.locations.find((location) => location.id === id)?.name ?? "that location";
+            setHeld({
+              token: `location:${id}`,
+              label: `Removing ${name}`,
+              commit: () =>
+                run(
+                  () => updateDispatchLocation({ data: { id, archived: true, day } }),
+                  "Could not remove that location.",
+                ),
+            });
+          }}
           onSaveStanding={(id, notes) =>
             updateDispatchLocation({ data: { id, notes, day } })
               .then(() => refresh())
@@ -438,22 +537,52 @@ export function DispatchView() {
                 throw cause;
               })
           }
-          onSaveDay={(locationId, notes) =>
-            setDispatchDayNote({ data: { locationId, day, notes } })
+          onSaveDay={(locationId, notes) => {
+            if (notes === "") {
+              setHeld({
+                token: `clear:${locationId}`,
+                label: "Clearing today's instructions",
+                commit: () =>
+                  setDispatchDayNote({ data: { locationId, day, notes: "" } })
+                    .then(() => refresh())
+                    .catch((cause: unknown) => {
+                      setError(message(cause, "Could not save that."));
+                      throw cause;
+                    }),
+              });
+              return Promise.resolve();
+            }
+            return setDispatchDayNote({ data: { locationId, day, notes } })
               .then(() => refresh())
               .catch((cause: unknown) => {
                 setError(message(cause, "Could not save that."));
                 throw cause;
-              })
-          }
-          onSavePersonNote={(userId, notes) =>
-            setDispatchPersonNote({ data: { userId, day, notes } })
+              });
+          }}
+          onSavePersonNote={(userId, notes) => {
+            if (notes === "") {
+              const name =
+                showing?.people.find((person) => person.userId === userId)?.name ?? "this person";
+              setHeld({
+                token: `pclear:${userId}`,
+                label: `Clearing instruction for ${name}`,
+                commit: () =>
+                  setDispatchPersonNote({ data: { userId, day, notes: "" } })
+                    .then(() => refresh())
+                    .catch((cause: unknown) => {
+                      setError(message(cause, "Could not save that."));
+                      throw cause;
+                    }),
+              });
+              return Promise.resolve();
+            }
+            return setDispatchPersonNote({ data: { userId, day, notes } })
               .then(() => refresh())
               .catch((cause: unknown) => {
                 setError(message(cause, "Could not save that."));
                 throw cause;
-              })
-          }
+              });
+          }}
           onSavePhone={(userId, phone) =>
             setDispatchPhone({ data: { userId, phone, day } })
               .then(() => refresh())
@@ -487,10 +616,11 @@ export function DispatchView() {
           }}
         />
       ) : null}
+      </div>
 
       {ghost ? (
         <div
-          className="pointer-events-none fixed z-50 rounded-md border border-copper bg-surface px-3 py-2 text-sm shadow-lg"
+          className="pointer-events-none fixed z-50 rounded-md border border-[#c6a15b] bg-surface px-3 py-2 text-sm shadow-lg"
           style={{ left: ghost.x + 14, top: ghost.y + 14 }}
           data-testid="dispatch-ghost"
         >
@@ -505,7 +635,30 @@ export function DispatchView() {
           onClick={() => setMenu(null)}
         />
       ) : null}
-      {showing ? <SendDock day={day} send={showing.send} canEdit={showing.canEdit} onRefresh={() => refresh()} /> : null}
+      {held ? (
+        <p
+          role="status"
+          data-testid="dispatch-action-undo"
+          className="mt-2 flex shrink-0 items-center justify-end gap-3 text-sm"
+        >
+          {held.label}
+          <button
+            type="button"
+            className={`h-11 rounded-full px-3 text-sm font-medium ${GOLD}`}
+            onClick={() => setHeld(null)}
+          >
+            Undo
+          </button>
+        </p>
+      ) : null}
+      {showing ? (
+        <SendDock
+          day={day}
+          send={showing.send}
+          canEdit={showing.canEdit}
+          onRefresh={() => refresh()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -579,6 +732,7 @@ function DayBoard({
     locationId?: string | null;
   }) => void;
 }) {
+  const [locMenu, setLocMenu] = useState<string | null>(null);
   const placed = board.daysPlaced.find((entry) => entry.day === day);
   const byId = new Map(board.people.map((person) => [person.userId, person]));
   const named = (rows: Placement[] | undefined) =>
@@ -607,14 +761,27 @@ function DayBoard({
 
   return (
     <div className="grid min-w-0 gap-4" data-testid="dispatch-day">
-      <div>
+      <div className="flex items-center gap-2">
         <p className="font-display text-2xl" data-testid="dispatch-start">
           Starts at {board.startLabel}
         </p>
-        <p className="mt-1 max-w-xl text-sm text-muted">
-          Full-time crew stay on a location until you move them. Part-time crew appear only on the
-          days you place them.
-        </p>
+        <span className="group relative">
+          <button
+            type="button"
+            className="grid h-11 w-11 place-items-center rounded-full text-muted"
+            aria-label="About the 8:00 AM start"
+            data-testid="dispatch-start-info"
+          >
+            <Info className="size-5" aria-hidden />
+          </button>
+          <span
+            role="tooltip"
+            className="pointer-events-none absolute left-0 top-12 z-20 hidden w-64 rounded-md border border-line bg-surface p-3 text-sm text-fg shadow group-focus-within:block group-hover:block"
+          >
+            Full-time crew stay on a location until you move them. Part-time crew appear only on the
+            days you place them.
+          </span>
+        </span>
       </div>
 
       {canEdit ? (
@@ -651,9 +818,14 @@ function DayBoard({
         />
       ) : null}
 
-      {hasPart ? (
+      {hasPart && available.length === 0 ? (
+        <p className="text-sm text-muted" data-testid="dispatch-available">
+          Available: none
+        </p>
+      ) : null}
+      {hasPart && available.length > 0 ? (
         <section
-          className={`rounded-md border bg-surface p-3 ${hot(ghost, "available") ? "border-copper ring-2 ring-copper" : "border-line"}`}
+          className={`rounded-md border bg-surface p-3 ${hot(ghost, "available") ? "border-[#c6a15b]" : "border-line"}`}
           data-drop="available"
           data-testid="dispatch-available"
         >
@@ -709,63 +881,70 @@ function DayBoard({
         return (
           <section
             key={location.id}
-            className={`rounded-md border bg-surface p-3 ${hot(ghost, location.id) ? "border-copper ring-2 ring-copper" : "border-line"}`}
+            className={`relative rounded-md border bg-surface p-3 ${hot(ghost, location.id) ? "border-[#c6a15b]" : "border-line"}`}
             data-drop={location.id}
             data-testid="dispatch-location"
           >
+            {hot(ghost, location.id) ? (
+              <div
+                className="absolute inset-x-0 top-0 h-1.5 rounded-t-md bg-[#c6a15b]"
+                data-testid="dispatch-drop-line"
+              />
+            ) : null}
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-lg">{location.name}</h2>
+                <h2 className="truncate text-lg">{location.name}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
+                  {location.address ? <span>{location.address}</span> : null}
+                  <span className="rounded-full bg-raised px-2 py-0.5 text-xs text-fg">
+                    {people.length} crew
+                  </span>
                   {location.linked ? <Chip>Job</Chip> : null}
                 </div>
-                {location.address ? <p className="text-sm text-muted">{location.address}</p> : null}
               </div>
               {canEdit ? (
-                <button
-                  type="button"
-                  className="h-11 shrink-0 rounded-md px-2 text-sm text-muted"
-                  aria-label={`Remove ${location.name}`}
-                  onClick={() => onRemoveLocation(location.id)}
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-            <div className="mt-3 grid gap-3">
-              {canEdit ? (
-                <>
-                  <NoteField
-                    label="Standing instructions"
-                    value={location.standingNotes}
-                    testId="dispatch-standing-note"
-                    onSave={(notes) => onSaveStanding(location.id, notes)}
-                  />
-                  <NoteField
-                    label="Today's instructions"
-                    value={location.dayNotes}
-                    testId="dispatch-day-note"
-                    onSave={(notes) => onSaveDay(location.id, notes)}
-                  />
-                  {location.dayNotes ? (
-                    <button
-                      type="button"
-                      className="h-11 justify-self-start rounded-md px-2 text-sm text-muted"
-                      aria-label={`Clear instructions for ${location.name}`}
-                      onClick={() => void onSaveDay(location.id, "")}
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    aria-label={`Actions for ${location.name}`}
+                    aria-expanded={locMenu === location.id}
+                    className="grid h-11 w-11 cursor-pointer place-items-center rounded-md text-muted"
+                    onClick={() => setLocMenu((current) => (current === location.id ? null : location.id))}
+                  >
+                    <MoreHorizontal className="size-5" aria-hidden />
+                  </button>
+                  {locMenu === location.id ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 z-30 mt-1 grid min-w-52 gap-1 rounded-md border border-line bg-bg p-2 shadow"
                     >
-                      Clear today's instructions
-                    </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="h-11 rounded-md px-2 text-left text-sm hover:bg-raised"
+                        onClick={() => {
+                          setLocMenu(null);
+                          onRemoveLocation(location.id);
+                        }}
+                      >
+                        Remove
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="h-11 rounded-md px-2 text-left text-sm hover:bg-raised"
+                        aria-label={`Clear instructions for ${location.name}`}
+                        onClick={() => {
+                          setLocMenu(null);
+                          void onSaveDay(location.id, "");
+                        }}
+                      >
+                        Clear today's instructions
+                      </button>
+                    </div>
                   ) : null}
-                </>
-              ) : (
-                <>
-                  {location.standingNotes ? (
-                    <p className="text-sm text-muted">{location.standingNotes}</p>
-                  ) : null}
-                  {location.dayNotes ? <p className="text-base">{location.dayNotes}</p> : null}
-                </>
-              )}
+                </div>
+              ) : null}
             </div>
             <div className="mt-3">
               <PersonList
@@ -783,6 +962,31 @@ function DayBoard({
                 onRemovePerson={onRemovePerson}
                 {...personExtras}
               />
+            </div>
+            <div className="mt-3 grid gap-3">
+              {canEdit ? (
+                <>
+                  <NoteField
+                    label="Standing instructions"
+                    value={location.standingNotes}
+                    testId="dispatch-standing-note"
+                    onSave={(notes) => onSaveStanding(location.id, notes)}
+                  />
+                  <NoteField
+                    label="Today's instructions"
+                    value={location.dayNotes}
+                    testId="dispatch-day-note"
+                    onSave={(notes) => onSaveDay(location.id, notes)}
+                  />
+                </>
+              ) : (
+                <>
+                  {location.standingNotes ? (
+                    <p className="text-sm text-muted">{location.standingNotes}</p>
+                  ) : null}
+                  {location.dayNotes ? <p className="text-base">{location.dayNotes}</p> : null}
+                </>
+              )}
             </div>
           </section>
         );
@@ -806,9 +1010,16 @@ function PersonFacts({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note);
-  const [phone, setPhone] = useState(person.phone ?? "");
+  const [phone, setPhone] = useState(person.phone ? formatPhone(person.phone) : "");
+  const noteArea = useRef<HTMLTextAreaElement>(null);
   useEffect(() => setDraft(note), [note]);
-  useEffect(() => setPhone(person.phone ?? ""), [person.phone]);
+  useEffect(() => setPhone(person.phone ? formatPhone(person.phone) : ""), [person.phone]);
+  useEffect(() => {
+    const node = noteArea.current;
+    if (!node) return;
+    node.style.height = "auto";
+    node.style.height = `${Math.max(node.scrollHeight, 44)}px`;
+  }, [draft, editing]);
   return (
     <div className="grid gap-1 px-2 pb-2">
       {canEdit ? (
@@ -822,21 +1033,30 @@ function PersonFacts({
           value={phone}
           onChange={(event) => setPhone(event.target.value)}
           onBlur={() => {
-            if (phone.trim() === (person.phone ?? "")) return;
+            const current = person.phone ? formatPhone(person.phone) : "";
+            if (phone.trim() === current) return;
             void onSavePhone(person.userId, phone);
           }}
         />
       ) : (
-        <p className="text-sm text-muted" data-testid="dispatch-phone">
-          {person.phone ? formatPhone(person.phone) : "No phone"}
+        <p className="text-sm" data-testid="dispatch-phone">
+          {person.phone ? (
+            <a className={BLUE} href={`tel:${person.phone}`}>
+              {formatPhone(person.phone)}
+            </a>
+          ) : (
+            "No phone"
+          )}
         </p>
       )}
       {editing ? (
         <div className="grid gap-1">
           <textarea
+            ref={noteArea}
+            rows={1}
             aria-label={`Instruction for ${person.name}`}
             data-testid="dispatch-person-note"
-            className="field"
+            className="field min-h-11 resize-y overflow-hidden"
             maxLength={800}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -844,7 +1064,7 @@ function PersonFacts({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="h-11 rounded-md bg-copper px-3 text-sm font-medium text-ink"
+              className={`h-11 rounded-md px-3 text-sm font-medium ${GOLD}`}
               onClick={() => void onSaveNote(person.userId, draft).then(() => setEditing(false))}
             >
               {`Save instruction for ${person.name}`}
@@ -868,19 +1088,16 @@ function PersonFacts({
       ) : null}
       {canEdit && !editing ? (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className="h-11 px-1 text-left text-sm text-copper" onClick={() => { setDraft(note); setEditing(true); }}>
+          <button
+            type="button"
+            className={`h-11 px-1 text-left text-sm ${BLUE}`}
+            onClick={() => {
+              setDraft(note);
+              setEditing(true);
+            }}
+          >
             {note ? `Edit instruction for ${person.name}` : `Instruction for ${person.name}`}
           </button>
-          {note ? (
-            <button
-              type="button"
-              className="h-11 px-1 text-sm text-muted"
-              aria-label={`Clear instruction for ${person.name}`}
-              onClick={() => void onSaveNote(person.userId, "")}
-            >
-              Clear
-            </button>
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -927,7 +1144,11 @@ function PersonList({
   return (
     <ul className="grid gap-1">
       {people.map((person) => (
-        <li key={person.userId} className="relative" data-testid="dispatch-person">
+        <li
+          key={person.userId}
+          className={`relative ${menu === person.userId ? "z-30" : ""}`}
+          data-testid="dispatch-person"
+        >
           <div
             className={`flex min-h-11 items-center gap-1 rounded-md bg-raised pr-2 ${ghost?.userId === person.userId ? "opacity-40" : ""}`}
           >
@@ -977,7 +1198,9 @@ function PersonList({
                   disabled={location.id === person.from}
                   onClick={() => onPlace(person.userId, location.id)}
                 >
-                  {location.name}
+                  {location.name.startsWith("Move to ")
+                    ? location.name
+                    : `Move to ${location.name}`}
                 </button>
               ))}
               {person.kind === "part" ? (
@@ -1005,10 +1228,24 @@ function PersonList({
               >
                 {person.kind === "full" ? "Make part-time" : "Make full-time"}
               </button>
+              {noteFor(person.userId) ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="h-11 rounded-md px-2 text-left text-sm hover:bg-raised"
+                  aria-label={`Clear instruction for ${person.name}`}
+                  onClick={() => {
+                    onMenu(null);
+                    void onSaveNote(person.userId, "");
+                  }}
+                >
+                  Clear instruction
+                </button>
+              ) : null}
               <button
                 type="button"
                 role="menuitem"
-                className="h-11 rounded-md px-2 text-left text-sm text-danger hover:bg-raised"
+                className="h-11 rounded-md px-2 text-left text-sm hover:bg-raised"
                 onClick={() => onRemovePerson(person.userId)}
               >
                 Remove from schedule
@@ -1228,7 +1465,10 @@ function WeekBoard({
 }) {
   const byId = new Map(board.people.map((person) => [person.userId, person]));
   return (
-    <div className="flex min-w-0 gap-3 overflow-x-auto pb-2" data-testid="dispatch-week">
+    <div
+      className="flex min-w-0 gap-2 overflow-x-auto pb-2 md:grid md:grid-cols-7 md:overflow-visible"
+      data-testid="dispatch-week"
+    >
       {board.days.map((day) => {
         const placed = board.daysPlaced.find((entry) => entry.day === day);
         const groups = board.locations
@@ -1243,34 +1483,55 @@ function WeekBoard({
         return (
           <section
             key={day}
-            className={`w-44 shrink-0 rounded-md border p-2 ${day === focus ? "border-copper" : "border-line"}`}
+            data-selected={day === focus ? "true" : "false"}
+            className={`w-40 shrink-0 overflow-hidden rounded-md border p-2 md:w-auto md:min-w-0 ${day === focus ? "border-[#c6a15b] bg-[#2a2418]" : "border-line"}`}
           >
             <button
               type="button"
-              className="h-11 w-full text-left text-sm font-medium"
+              className="sticky top-0 z-10 h-11 w-full bg-inherit text-left text-sm font-medium"
               onClick={() => onOpen(day)}
             >
-              {formatDispatchDay(day).replace(/, /, " ")}
+              {formatDispatchDayShort(day)}
             </button>
             {groups.length === 0 ? <p className="text-sm text-muted">No one placed</p> : null}
             <ul className="grid gap-2">
               {groups.map((group) => (
                 <li key={group.location.id}>
                   <p className="truncate text-sm font-medium">{group.location.name}</p>
-                  {board.locationInstructions.find((note) => note.locationId === group.location.id && note.day === day) ? (
-                    <p className="text-xs text-muted" data-testid="dispatch-week-location-note">
-                      {board.locationInstructions.find((note) => note.locationId === group.location.id && note.day === day)?.body}
+                  {board.locationInstructions.find(
+                    (note) => note.locationId === group.location.id && note.day === day,
+                  ) ? (
+                    <p
+                      className="line-clamp-2 text-xs text-muted"
+                      data-testid="dispatch-week-location-note"
+                    >
+                      {
+                        board.locationInstructions.find(
+                          (note) => note.locationId === group.location.id && note.day === day,
+                        )?.body
+                      }
                     </p>
                   ) : null}
                   <ul>
                     {group.people.map((row) => {
                       const person = byId.get(row.userId);
-                      const instruction = board.personInstructions.find((note) => note.userId === row.userId && note.day === day);
+                      const instruction = board.personInstructions.find(
+                        (note) => note.userId === row.userId && note.day === day,
+                      );
                       return (
                         <li key={row.userId} className="text-sm text-muted">
                           <p className="truncate">{person?.name ?? "Crew"}</p>
-                          {person?.phone ? <p className="truncate text-xs">{formatPhone(person.phone)}</p> : null}
-                          {instruction ? <p className="text-xs" data-testid="dispatch-week-person-note">{instruction.body}</p> : null}
+                          {person?.phone ? (
+                            <p className="truncate text-xs">{formatPhone(person.phone)}</p>
+                          ) : null}
+                          {instruction ? (
+                            <p
+                              className="line-clamp-2 text-xs"
+                              data-testid="dispatch-week-person-note"
+                            >
+                              {instruction.body}
+                            </p>
+                          ) : null}
                         </li>
                       );
                     })}

@@ -91,7 +91,10 @@ export function SignInButtons() {
  * role (when given), and a full-width Sign out row. md+: inline name and a 44 px
  * Sign out button at full contrast.
  */
-export function UserButton({ roleLabel }: { roleLabel?: string } = {}) {
+export function UserButton({
+  roleLabel,
+  hideInitial = false,
+}: { roleLabel?: string; hideInitial?: boolean } = {}) {
   const user = useCurrentUser();
   // Sign-out can take a moment (and can fail when deployed), so the control
   // shows it is working and cannot be fired twice.
@@ -114,8 +117,10 @@ export function UserButton({ roleLabel }: { roleLabel?: string } = {}) {
     user.profileImageUrl ? (
       <img src={user.profileImageUrl} alt="" className={`${size} rounded-full object-cover`} />
     ) : (
-      <span className={`grid ${size} place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20`}>
-        {label.charAt(0).toUpperCase()}
+      <span
+        className={`grid ${size} place-items-center rounded-full bg-black/10 text-sm font-medium dark:bg-white/20`}
+      >
+        {hideInitial ? "" : label.charAt(0).toUpperCase()}
       </span>
     );
   return (
@@ -157,7 +162,7 @@ export function UserButton({ roleLabel }: { roleLabel?: string } = {}) {
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
       <div className="hidden items-center gap-2 md:flex">
-        {avatar("h-8 w-8")}
+        {hideInitial ? null : avatar("h-8 w-8")}
         <span className="text-sm font-medium">{label}</span>
         {canSignOut && (
           <button

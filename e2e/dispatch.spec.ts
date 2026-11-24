@@ -84,11 +84,22 @@ function location(page: Page, name: string): Locator {
   return page.getByTestId("dispatch-location").filter({ hasText: name });
 }
 
-async function dragPerson(page: Page, name: string, target: Locator) {
+async function dragPerson(page: Page, name: string, target: Locator, line = false) {
   const handle = page.getByRole("button", { name: `Move ${name}` });
   await handle.scrollIntoViewIfNeeded();
   await target.scrollIntoViewIfNeeded();
-  await handle.dragTo(target, { targetPosition: { x: 28, y: 28 } });
+  if (!line) {
+    await handle.dragTo(target, { targetPosition: { x: 40, y: 48 } });
+    return;
+  }
+  const from = await handle.boundingBox();
+  const to = await target.boundingBox();
+  if (!from || !to) throw new Error(`missing drag box for ${name}`);
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + 40, to.y + 48, { steps: 12 });
+  await expect(target.getByTestId("dispatch-drop-line")).toBeVisible();
+  await page.mouse.up();
 }
 
 test.describe.configure({ mode: "serial" });
@@ -136,6 +147,9 @@ for (const role of ["labor", "subcontractor"] as const) {
     await expect(page.getByTestId("dispatch-add-location")).toHaveCount(0);
     await expect(page.getByTestId("dispatch-handle")).toHaveCount(0);
     await expect(page.getByTestId("dispatch-send")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Actions for/ })).toHaveCount(0);
+    await expect(page.getByTestId("dispatch-move-menu")).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: /Move to|Remove|Clear/ })).toHaveCount(0);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
     );
@@ -154,6 +168,7 @@ for (const role of ["labor", "subcontractor"] as const) {
 test("owner: day board, drag between locations, carry-forward, and the week", async ({
   browser,
 }) => {
+  test.setTimeout(120_000);
   const { ctx, page } = await as(browser, "owner");
   await openDispatch(page);
 
@@ -185,7 +200,17 @@ test("owner: day board, drag between locations, carry-forward, and the week", as
     .getByTestId("dispatch-person-form")
     .getByRole("button", { name: "Add to schedule" })
     .click();
-  await expect(location(page, "Whitaker kitchen remodel").getByText("Luis Moreno", { exact: true })).toBeVisible();
+  await expect(
+    location(page, "Whitaker kitchen remodel").getByText("Luis Moreno", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Move Luis Moreno" }).click();
+  await page.getByRole("menuitem", { name: "Move to Shop" }).click();
+  await expect(location(page, "Shop").getByText("Luis Moreno", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Move Luis Moreno" }).click();
+  await page.getByRole("menuitem", { name: "Move to Whitaker kitchen remodel" }).click();
+  await expect(
+    location(page, "Whitaker kitchen remodel").getByText("Luis Moreno", { exact: true }),
+  ).toBeVisible();
 
   await page.getByTestId("dispatch-add-person").click();
   await page
@@ -197,40 +222,47 @@ test("owner: day board, drag between locations, carry-forward, and the week", as
     .getByRole("button", { name: "Add to schedule" })
     .click();
   await expect(
-    page.getByTestId("dispatch-available").getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
+    page
+      .getByTestId("dispatch-available")
+      .getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
   ).toBeVisible();
 
   await shop.getByTestId("dispatch-day-note").fill("Bring the trailer.");
   await shop.getByTestId("dispatch-day-note").blur();
   await expect(shop.getByText("Saved")).toBeVisible();
-  await shop.getByRole("button", { name: "Clear instructions for Shop" }).click();
-  await expect(shop.getByTestId("dispatch-day-note")).toHaveValue("");
-  await shop.getByTestId("dispatch-day-note").fill("Bring the trailer.");
-  await shop.getByTestId("dispatch-day-note").blur();
+  await shop.getByRole("button", { name: "Actions for Shop" }).click();
+  await shop.getByRole("menuitem", { name: "Clear instructions for Shop" }).click();
+  await expect(page.getByTestId("dispatch-action-undo")).toBeVisible();
   await expect(shop.getByTestId("dispatch-day-note")).toHaveValue("Bring the trailer.");
+  await page.getByTestId("dispatch-action-undo").getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByTestId("dispatch-action-undo")).toHaveCount(0);
 
   const luis = page.getByTestId("dispatch-person").filter({ hasText: "Luis Moreno" });
   await luis.getByRole("button", { name: "Instruction for Luis Moreno" }).click();
   await luis.getByLabel("Instruction for Luis Moreno").fill("Call the homeowner.");
   await luis.getByRole("button", { name: "Save instruction for Luis Moreno" }).click();
   await expect(luis.getByTestId("dispatch-person-note")).toHaveText("Call the homeowner.");
-  await luis.getByRole("button", { name: "Clear instruction for Luis Moreno" }).click();
-  await expect(luis.getByTestId("dispatch-person-note")).toHaveCount(0);
-  await luis.getByRole("button", { name: "Instruction for Luis Moreno" }).click();
-  await luis.getByLabel("Instruction for Luis Moreno").fill("Call the homeowner.");
-  await luis.getByRole("button", { name: "Save instruction for Luis Moreno" }).click();
+  await luis.getByRole("button", { name: "Move Luis Moreno" }).click();
+  await luis.getByRole("menuitem", { name: "Clear instruction for Luis Moreno" }).click();
+  await expect(page.getByTestId("dispatch-action-undo")).toContainText(
+    "Clearing instruction for Luis Moreno",
+  );
+  await expect(luis.getByTestId("dispatch-person-note")).toHaveText("Call the homeowner.");
+  await page.getByTestId("dispatch-action-undo").getByRole("button", { name: "Undo" }).click();
   await expect(luis.getByTestId("dispatch-person-note")).toHaveText("Call the homeowner.");
 
   await luis.getByLabel("Phone for Luis Moreno").fill("(859) 555-0100");
   await luis.getByLabel("Phone for Luis Moreno").blur();
-  await expect(luis.getByLabel("Phone for Luis Moreno")).toHaveValue("+18595550100");
+  await expect(luis.getByLabel("Phone for Luis Moreno")).toHaveValue("+1 859-555-0100");
   await luis.getByLabel("Phone for Luis Moreno").fill("8595550199");
   await luis.getByLabel("Phone for Luis Moreno").blur();
-  await expect(luis.getByLabel("Phone for Luis Moreno")).toHaveValue("+18595550199");
+  await expect(luis.getByLabel("Phone for Luis Moreno")).toHaveValue("+1 859-555-0199");
 
-  await dragPerson(page, "Luis Moreno", shop);
+  await dragPerson(page, "Luis Moreno", shop, true);
   await expect(shop.getByText("Luis Moreno", { exact: true })).toBeVisible();
-  await expect(location(page, "Whitaker kitchen remodel").getByText("Luis Moreno", { exact: true })).toHaveCount(0);
+  await expect(
+    location(page, "Whitaker kitchen remodel").getByText("Luis Moreno", { exact: true }),
+  ).toHaveCount(0);
 
   await dragPerson(
     page,
@@ -238,10 +270,14 @@ test("owner: day board, drag between locations, carry-forward, and the week", as
     location(page, "Whitaker kitchen remodel"),
   );
   await expect(
-    location(page, "Whitaker kitchen remodel").getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
+    location(page, "Whitaker kitchen remodel").getByText("Sam Whitfield (Bluegrass Electric)", {
+      exact: true,
+    }),
   ).toBeVisible();
   await expect(
-    page.getByTestId("dispatch-available").getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
+    page
+      .getByTestId("dispatch-available")
+      .getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
   ).toHaveCount(0);
 
   await page.reload();
@@ -252,23 +288,44 @@ test("owner: day board, drag between locations, carry-forward, and the week", as
   );
 
   await page.getByRole("button", { name: "Previous day" }).click();
+  await expect(location(page, "Shop").getByText("Luis Moreno", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Previous day" }).click();
   await expect(location(page, "Shop").getByText("Luis Moreno", { exact: true })).toHaveCount(0);
-
+  await page.getByRole("button", { name: "Next day" }).click();
   await page.getByRole("button", { name: "Next day" }).click();
   await expect(location(page, "Shop").getByText("Luis Moreno", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Next day" }).click();
   await expect(location(page, "Shop").getByText("Luis Moreno", { exact: true })).toBeVisible();
   await expect(
-    page.getByTestId("dispatch-available").getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
+    page
+      .getByTestId("dispatch-available")
+      .getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
   ).toBeVisible();
   await expect(
-    location(page, "Whitaker kitchen remodel").getByText("Sam Whitfield (Bluegrass Electric)", { exact: true }),
+    location(page, "Whitaker kitchen remodel").getByText("Sam Whitfield (Bluegrass Electric)", {
+      exact: true,
+    }),
   ).toHaveCount(0);
+
+  await page.getByTestId("dispatch-scroll").evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  const field = await page.getByTestId("dispatch-day-note").last().boundingBox();
+  const dock = await page.getByTestId("dispatch-send-dock").boundingBox();
+  expect(field && dock && field.y + field.height <= dock.y + 2).toBeTruthy();
 
   await page.getByTestId("dispatch-tab-week").click();
   const week = page.getByTestId("dispatch-week");
   await expect(week).toBeVisible();
   await expect(week.getByRole("button")).toHaveCount(7);
+  await expect(week.locator("section")).toHaveCount(7);
+  await expect(week.locator("[data-selected='true']")).toHaveCount(1);
+  await expect(week.getByText("No one placed")).toHaveCount(0);
+  const widths = await week
+    .locator("section")
+    .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(8);
+  await expect(week.getByTestId("dispatch-week-location-note").first()).toHaveClass(/line-clamp-2/);
   await expect(week.getByText("Luis Moreno", { exact: true }).first()).toBeVisible();
   await expect(week.getByText("Shop").first()).toBeVisible();
   await expect(week.getByText("Bring the trailer.").first()).toBeVisible();
@@ -296,6 +353,12 @@ test("owner on a phone: dragging the handle still moves a person", async ({ brow
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
   );
   expect(overflow).toBe(false);
+  await page.getByTestId("dispatch-scroll").evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  const field = await page.getByTestId("dispatch-day-note").last().boundingBox();
+  const dock = await page.getByTestId("dispatch-send-dock").boundingBox();
+  expect(field && dock && field.y + field.height <= dock.y + 2).toBeTruthy();
   await ctx.close();
 });
 
@@ -309,6 +372,9 @@ test("labor sees the day's instructions and phone, and cannot change them", asyn
   await expect(page.getByRole("button", { name: /Instruction for/ })).toHaveCount(0);
   await expect(page.getByLabel("Phone for Luis Moreno")).toHaveCount(0);
   await expect(page.getByTestId("dispatch-send")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Actions for/ })).toHaveCount(0);
+  await expect(page.getByTestId("dispatch-move-menu")).toHaveCount(0);
+  await expect(page.getByRole("menuitem", { name: /Move to/ })).toHaveCount(0);
   for (const [fn, data] of [
     ["setDispatchPersonNote", { userId: "x", day: "2026-11-24", notes: "no" }],
     ["setDispatchPhone", { userId: "x", phone: "8595550100" }],
@@ -322,6 +388,7 @@ test("labor sees the day's instructions and phone, and cannot change them", asyn
 });
 
 test("undo shows for 5 seconds without a confirm dialog", async ({ browser }) => {
+  test.setTimeout(90_000);
   const ctx = await browser.newContext({ viewport: DESKTOP });
   const page = await ctx.newPage();
   await page.clock.install();
@@ -345,5 +412,33 @@ test("undo shows for 5 seconds without a confirm dialog", async ({ browser }) =>
   expect(dialog).toBe(false);
   await page.clock.fastForward(5_000);
   await expect(page.getByTestId("dispatch-undo")).toHaveCount(0);
+
+  const yard = location(page, "Undo yard");
+  await yard.getByTestId("dispatch-day-note").fill("Keep this.");
+  await yard.getByTestId("dispatch-day-note").blur();
+  await expect(yard.getByText("Saved")).toBeVisible();
+  await yard.getByRole("button", { name: "Actions for Undo yard" }).click();
+  await yard.getByRole("menuitem", { name: "Clear instructions for Undo yard" }).click();
+  await expect(page.getByTestId("dispatch-action-undo")).toContainText(
+    "Clearing today's instructions",
+  );
+  await expect(yard.getByTestId("dispatch-day-note")).toHaveValue("Keep this.");
+  await page.getByTestId("dispatch-action-undo").getByRole("button", { name: "Undo" }).click();
+  await expect(yard.getByTestId("dispatch-day-note")).toHaveValue("Keep this.");
+  await yard.getByRole("button", { name: "Actions for Undo yard" }).click();
+  await yard.getByRole("menuitem", { name: "Clear instructions for Undo yard" }).click();
+  await page.clock.fastForward(5_000);
+  await expect(page.getByTestId("dispatch-action-undo")).toHaveCount(0);
+  await expect(yard.getByTestId("dispatch-day-note")).toHaveValue("");
+
+  await yard.getByRole("button", { name: "Actions for Undo yard" }).click();
+  await yard.getByRole("menuitem", { name: "Remove" }).click();
+  await expect(page.getByTestId("dispatch-action-undo")).toContainText("Removing Undo yard");
+  await page.getByTestId("dispatch-action-undo").getByRole("button", { name: "Undo" }).click();
+  await expect(yard).toBeVisible();
+  await yard.getByRole("button", { name: "Actions for Undo yard" }).click();
+  await yard.getByRole("menuitem", { name: "Remove" }).click();
+  await page.clock.fastForward(5_000);
+  await expect(location(page, "Undo yard")).toHaveCount(0);
   await ctx.close();
 });

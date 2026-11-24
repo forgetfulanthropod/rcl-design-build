@@ -108,6 +108,13 @@ for (const role of ["labor", "sub"] as const) {
       dispatch.updateLocation(co.users[role], { id: shop.id, notes: "no" }, sql),
       { name: "ForbiddenError" },
     );
+    await assert.rejects(dispatch.updateLocation(co.users[role], { id: shop.id, archived: true }, sql), {
+      name: "ForbiddenError",
+    });
+    await assert.rejects(
+      dispatch.setDayNote(co.users[role], { locationId: shop.id, day: "2026-11-02", notes: "" }, sql),
+      { name: "ForbiddenError" },
+    );
     await assert.rejects(
       dispatch.setDayNote(
         co.users[role],

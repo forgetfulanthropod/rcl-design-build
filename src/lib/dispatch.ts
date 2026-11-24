@@ -35,6 +35,14 @@ export function formatDispatchDay(iso: string): string {
   });
 }
 
+export function formatDispatchDayShort(iso: string): string {
+  return parseDay(iso).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function formatDispatchWeek(monday: string): string {
   const days = dispatchWeekDays(monday);
   const a = parseDay(days[0]);
@@ -89,13 +97,32 @@ export function resolveDay(
     const prior = placements
       .filter((p) => p.userId === person.userId && p.kind === "full" && p.day <= day)
       .sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0));
-    const row = prior[0];
+    let row = prior[0];
+    let backfill = false;
+    if (!row) {
+      // A full-timer placed later in the same week still belongs on Monday.
+      const monday = weekStart(day);
+      const sunday = addDays(monday, 6);
+      const later = placements
+        .filter(
+          (p) =>
+            p.userId === person.userId &&
+            p.kind === "full" &&
+            p.day > day &&
+            p.day >= monday &&
+            p.day <= sunday &&
+            p.locationId,
+        )
+        .sort((a, b) => (a.day < b.day ? -1 : 1));
+      row = later[0];
+      backfill = Boolean(row);
+    }
     const locationId = row?.locationId && active.has(row.locationId) ? row.locationId : null;
     return {
       userId: person.userId,
       kind: "full",
       locationId,
-      carried: Boolean(row && row.day < day && locationId),
+      carried: Boolean(row && locationId && (backfill || row.day < day)),
     };
   });
 }
