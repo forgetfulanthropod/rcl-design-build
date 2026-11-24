@@ -7,6 +7,7 @@ import { WorkDayBar } from "@/components/work-day-bar";
 import { PhotoDrop } from "@/components/photo-drop";
 import { PhotoRemoveButton, PhotoUndoToast } from "@/components/photo-thumb";
 import { PHOTO_UNDO_MS } from "@/lib/photo-remove";
+import { clampPhotoPage, photoPageCount, photoPageSlice } from "@/lib/photo-pages";
 import { DayExport } from "@/components/day-export";
 import { buildActivityPdf, type ActivityPdfItem } from "@/lib/activity-pdf";
 import { photoCaptionHeading } from "@/lib/photo-caption";
@@ -456,6 +457,10 @@ function TrackingPage() {
   const heldPhoto = useRef<{ id: string; timer: number } | null>(null);
   const [hiddenPhotos, setHiddenPhotos] = useState<Set<string>>(new Set());
   const [photoUndo, setPhotoUndo] = useState(false);
+  const [photoPage, setPhotoPage] = useState(0);
+  useEffect(() => {
+    setPhotoPage(0);
+  }, [day]);
 
   function forgetPhoto(id: string) {
     setLog((current) => {
@@ -718,6 +723,10 @@ function TrackingPage() {
   }
 
   const isSample = day === SAMPLE_DAY;
+  const dayPhotos = entries.filter((entry) => entry.kind === "photo");
+  const pageCount = photoPageCount(dayPhotos.length);
+  const safePage = clampPhotoPage(photoPage, dayPhotos.length);
+  const onPage = new Set(photoPageSlice(dayPhotos, safePage).map((entry) => entry.id));
 
   return (
     <main className="relative mx-auto max-w-lg px-4 pb-28 pt-8">
@@ -794,13 +803,41 @@ function TrackingPage() {
         </p>
       ) : null}
 
+      {dayPhotos.length > 0 ? (
+        <div className="mt-4 flex items-center justify-between gap-2" data-testid="photo-pages">
+          <button
+            type="button"
+            className="h-11 min-w-11 rounded-md border border-line px-3 text-sm disabled:opacity-40"
+            aria-label="Previous photos"
+            data-testid="photo-page-prev"
+            disabled={safePage === 0}
+            onClick={() => setPhotoPage(safePage - 1)}
+          >
+            Prev
+          </button>
+          <p className="text-sm tabular-nums text-muted" data-testid="photo-page-label">
+            Page {safePage + 1} of {pageCount}
+          </p>
+          <button
+            type="button"
+            className="h-11 min-w-11 rounded-md border border-line px-3 text-sm disabled:opacity-40"
+            aria-label="Next photos"
+            data-testid="photo-page-next"
+            disabled={safePage >= pageCount - 1}
+            onClick={() => setPhotoPage(safePage + 1)}
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
+
       <div className="mb-6 mt-4 space-y-3">
         {entries.length === 0 ? (
           <p className="text-muted">No entries for this day yet. Drop photos above, or use the green button for a note or lunch.</p>
         ) : (
           entries.map((e) =>
             e.kind === "photo" ? (
-              hiddenPhotos.has(e.id) ? null : (
+              !onPage.has(e.id) || hiddenPhotos.has(e.id) ? null : (
               <figure key={e.id} className="rounded border border-line bg-raised p-3" data-testid="photo-caption">
                 {e.project ? <p className="mb-1 text-xs text-muted">{e.project}</p> : null}
                 <div className="relative">
