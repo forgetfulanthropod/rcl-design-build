@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 import { buildActivityPdf } from "./activity-pdf.ts";
 import { extractPdfText } from "./pdf.ts";
 
+function pdfPageCount(bytes: Uint8Array): number {
+  const raw = Buffer.from(bytes).toString("latin1");
+  const match = raw.match(/\/Type \/Pages \/Kids \[[^\]]+\] \/Count (\d+)/);
+  return match ? Number(match[1]) : 0;
+}
+
 test("activity PDF puts the creation time above the caption, and still letters saved sessions", () => {
   const bytes = buildActivityPdf({
     dayKey: "2026-11-02",
@@ -64,6 +70,40 @@ test("activity PDF project time is the entered session, on that session's projec
   assert.match(text, /Total: 30m/);
   assert.equal(text.includes("Unassigned"), false);
   assert.equal(text.includes(": 1m"), false);
+});
+
+test("activity PDF puts four captioned photos on a page and keeps every photo", () => {
+  const photos = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      kind: "photo" as const,
+      captionTime: `${i + 1}:00 PM`,
+      caption: `Photo ${i + 1}`,
+      jpeg: null,
+    }));
+  const five = buildActivityPdf({
+    dayKey: "2026-11-24",
+    dayLabel: "Tuesday, Nov 24, 2026",
+    items: photos(5),
+    sessions: [],
+  });
+  assert.equal(pdfPageCount(five), 2);
+  const text = extractPdfText(five).join("");
+  for (let i = 1; i <= 5; i += 1) {
+    assert.ok(text.includes(`${i}:00 PM`), `time ${i}`);
+    assert.ok(text.includes(`Photo ${i}`), `caption ${i}`);
+  }
+  assert.equal(pdfPageCount(buildActivityPdf({
+    dayKey: "2026-11-24",
+    dayLabel: "Tuesday, Nov 24, 2026",
+    items: photos(4),
+    sessions: [],
+  })), 1);
+  assert.equal(pdfPageCount(buildActivityPdf({
+    dayKey: "2026-11-24",
+    dayLabel: "Tuesday, Nov 24, 2026",
+    items: photos(8),
+    sessions: [],
+  })), 2);
 });
 
 test("photos with no session do not invent project time", () => {

@@ -188,6 +188,22 @@ export class PdfDoc {
     if (!info) return null;
     return info.height * Math.min(1, this.contentWidth / info.width, maxHeight / info.height);
   }
+  /**
+   * Embed a JPEG inside a box without moving the cursor.
+   * `bottom` is the PDF y of the box's bottom edge. Returns the drawn size.
+   */
+  placeJpeg(bytes: Uint8Array, x: number, bottom: number, maxW: number, maxH: number): { w: number; h: number } | null {
+    const info = jpegInfo(bytes);
+    if (!info) return null;
+    const scale = Math.min(1, maxW / info.width, maxH / info.height);
+    const w = info.width * scale;
+    const h = info.height * scale;
+    const name = `Im${this.images.length + 1}`;
+    this.images.push({ name, bytes, info });
+    this.page.images.add(name);
+    this.page.ops.push(`q ${n(w)} 0 0 ${n(h)} ${n(x)} ${n(bottom)} cm /${name} Do Q`);
+    return { w, h };
+  }
   /** Embed a JPEG at the cursor, scaled to fit. Returns false (and draws nothing) if it isn't a JPEG. */
   jpeg(bytes: Uint8Array, maxHeight = 340): boolean {
     const info = jpegInfo(bytes);

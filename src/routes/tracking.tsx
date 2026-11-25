@@ -3,6 +3,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { photoClockLabel } from "@/lib/report-entries";
 import { preparePhoto } from "@/lib/photo-prepare";
+import {
+  ACTIVITY_PHOTO_MAX_BYTES,
+  ACTIVITY_PHOTO_MAX_SIDE,
+  ACTIVITY_PHOTO_READ_MS,
+  activityPhotoMessage,
+  addActivityPhotos,
+  settlePhotoRead,
+  tryStore,
+} from "@/lib/activity-photos";
 import { WorkDayBar } from "@/components/work-day-bar";
 import { PhotoDrop } from "@/components/photo-drop";
 import { PhotoRemoveButton, PhotoUndoToast } from "@/components/photo-thumb";
@@ -173,7 +182,11 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
     },
   ];
   const next = { ...log, [SAMPLE_DAY]: sample };
-  saveLog(next);
+  try {
+    saveLog(next);
+  } catch {
+    // The sample still shows in memory when this browser cannot store it.
+  }
   return next;
 }
 
@@ -291,6 +304,7 @@ function TrackingPage() {
   const [photoBusy, setPhotoBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
+  const [failedPhotos, setFailedPhotos] = useState<{ key: string; name: string; message: string; file: File }[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const [canFileShare, setCanFileShare] = useState(false);
   const [linkToken, setLinkToken] = useState("");
@@ -423,35 +437,102 @@ function TrackingPage() {
     setMenuOpen(false);
   }
 
+  function storeLog(next: DayLog): string | null {
+    return tryStore(() => saveLog(next));
+  }
+
   async function addPhotos(files: File[]) {
     setPhotoBusy(true);
     setPhotoError("");
-    const added: Entry[] = [];
-    const errors: string[] = [];
-    for (const file of files) {
-      try {
-        const photo = await preparePhoto(file);
-        added.push({
-          id: crypto.randomUUID(),
-          ts: new Date().toISOString(),
-          kind: "photo",
-          body: "",
-          dataUrl: photo.image,
-          project: activeProject || undefined,
-          takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
-          takenSource: photo.takenSource,
-        });
-      } catch (cause) {
-        errors.push(cause instanceof Error ? cause.message : "Couldn't read that photo.");
+    let working = log;
+    try {
+      const { failed } = await addActivityPhotos({
+        files,
+        nameOf: (file) => file.name || "Photo",
+        read: async (file) => {
+          const photo = await settlePhotoRead(
+            preparePhoto(file, { maxSide: ACTIVITY_PHOTO_MAX_SIDE, maxBytes: ACTIVITY_PHOTO_MAX_BYTES }),
+            ACTIVITY_PHOTO_READ_MS,
+          );
+          const entry: Entry = {
+            id: crypto.randomUUID(),
+            ts: new Date().toISOString(),
+            kind: "photo",
+            body: "",
+            dataUrl: photo.image,
+            project: activeProject || undefined,
+            takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
+            takenSource: photo.takenSource,
+          };
+          return entry;
+        },
+        store: (entry) => {
+          const next = { ...working, [day]: [...(working[day] ?? []), entry] };
+          const problem = storeLog(next);
+          if (problem) throw new Error(problem);
+          working = next;
+          setLog(next);
+        },
+      });
+      if (failed.length) {
+        setPhotoError(failed.map((item) => item.message).join(" "));
+        setFailedPhotos((current) => [
+          ...current,
+          ...failed.map((item) => ({
+            key: crypto.randomUUID(),
+            name: item.name,
+            message: item.message,
+            file: item.file,
+          })),
+        ]);
       }
+    } catch (cause) {
+      const message = activityPhotoMessage(cause);
+      setPhotoError(message);
+      const file = files[0];
+      if (file) {
+        setFailedPhotos((current) => [...current, { key: crypto.randomUUID(), name: file.name || "Photo", message, file }]);
+      }
+    } finally {
+      setPhotoBusy(false);
     }
-    if (added.length) {
-      const next = { ...log, [day]: [...(log[day] ?? []), ...added] };
+  }
+
+  async function retryFailed(key: string) {
+    const item = failedPhotos.find((photo) => photo.key === key);
+    if (!item) return;
+    setPhotoBusy(true);
+    setPhotoError("");
+    try {
+      const photo = await settlePhotoRead(
+        preparePhoto(item.file, { maxSide: ACTIVITY_PHOTO_MAX_SIDE, maxBytes: ACTIVITY_PHOTO_MAX_BYTES }),
+        ACTIVITY_PHOTO_READ_MS,
+      );
+      const entry: Entry = {
+        id: crypto.randomUUID(),
+        ts: new Date().toISOString(),
+        kind: "photo",
+        body: "",
+        dataUrl: photo.image,
+        project: activeProject || undefined,
+        takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
+        takenSource: photo.takenSource,
+      };
+      const next = { ...log, [day]: [...(log[day] ?? []), entry] };
+      const problem = storeLog(next);
+      if (problem) {
+        setFailedPhotos((current) => current.map((photo) => (photo.key === key ? { ...photo, message: problem } : photo)));
+        return;
+      }
       setLog(next);
-      saveLog(next);
+      setFailedPhotos((current) => current.filter((photo) => photo.key !== key));
+    } catch (cause) {
+      setFailedPhotos((current) =>
+        current.map((photo) => (photo.key === key ? { ...photo, message: activityPhotoMessage(cause) } : photo)),
+      );
+    } finally {
+      setPhotoBusy(false);
     }
-    setPhotoError(errors[0] ?? "");
-    setPhotoBusy(false);
   }
 
   const heldPhoto = useRef<{ id: string; timer: number } | null>(null);
@@ -802,6 +883,24 @@ function TrackingPage() {
           {photoError}
         </p>
       ) : null}
+      {failedPhotos.map((item) => (
+        <div key={item.key} className="mt-3 rounded-md border border-line bg-raised p-3" data-testid="photo-add-failed" role="alert">
+          <p className="text-sm font-medium">{item.name}</p>
+          <p className="mt-1 text-sm">{item.message}</p>
+          <div className="mt-2 flex gap-2">
+            <button type="button" className="h-11 rounded-md border border-line px-3 text-sm" onClick={() => void retryFailed(item.key)}>
+              Retry
+            </button>
+            <button
+              type="button"
+              className="h-11 rounded-md border border-line px-3 text-sm"
+              onClick={() => setFailedPhotos((current) => current.filter((photo) => photo.key !== item.key))}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
 
       {dayPhotos.length > 0 ? (
         <div className="mt-4 flex items-center justify-between gap-2" data-testid="photo-pages">
