@@ -10,6 +10,7 @@ import {
   exifTakenAt,
   firstThatFits,
   isHeic,
+  prepareSteps,
   resolvePhotoClock,
   tooLargeMessage,
   type PhotoTimeSource,
@@ -53,13 +54,19 @@ function encode(img: HTMLImageElement, max: number, quality: number) {
   return { url, w, h };
 }
 
-export async function preparePhoto(file: File): Promise<Prepared> {
+export async function preparePhoto(
+  file: File,
+  limits?: { maxSide?: number; maxBytes?: number },
+): Promise<Prepared> {
   const big = tooLargeMessage(file.size);
   if (big) throw new Error(big);
   // The whole file: a HEIC Exif item can sit past the first boxes, and heic2any strips it.
   const bytes = new Uint8Array(await file.arrayBuffer());
   const head = bytes.subarray(0, Math.min(bytes.length, 256 * 1024));
-  const clock = resolvePhotoClock({ exif: exifIso(exifTakenAt(bytes)), lastModified: file.lastModified });
+  const clock = resolvePhotoClock({
+    exif: exifIso(exifTakenAt(bytes)),
+    lastModified: file.lastModified,
+  });
   let img: HTMLImageElement;
   let converted = false;
   try {
@@ -75,7 +82,12 @@ export async function preparePhoto(file: File): Promise<Prepared> {
       throw new Error("Couldn't convert that iPhone (HEIC) photo. Try sharing it as a JPEG.");
     }
   }
-  const full = firstThatFits((q) => encode(img, STORED_MAX_SIDE, q)) ?? firstThatFits((q) => encode(img, 1024, q));
+  const steps = prepareSteps(limits?.maxSide ?? STORED_MAX_SIDE, limits?.maxBytes);
+  let full: { url: string; w: number; h: number } | null = null;
+  for (const step of steps) {
+    full = firstThatFits((q) => encode(img, step.side, q), step.maxBytes);
+    if (full) break;
+  }
   if (!full) throw new Error("That photo is too detailed to upload. Try a smaller one.");
   const thumb = encode(img, 320, 0.7);
   return {
