@@ -204,6 +204,23 @@ export class PdfDoc {
     this.y -= 4;
     return true;
   }
+  /**
+   * Embed a JPEG in a box without moving the cursor. `bottom` is the box's lower edge.
+   * The picture is scaled to fit and sits on that edge. Returns false if it isn't a JPEG.
+   */
+  jpegBox(bytes: Uint8Array, x: number, bottom: number, maxW: number, maxH: number): boolean {
+    const info = jpegInfo(bytes);
+    if (!info || maxW <= 0 || maxH <= 0) return false;
+    const scale = Math.min(maxW / info.width, maxH / info.height);
+    const w = info.width * scale;
+    const h = info.height * scale;
+    const name = `Im${this.images.length + 1}`;
+    this.images.push({ name, bytes, info });
+    this.page.images.add(name);
+    const dx = x + (maxW - w) / 2;
+    this.page.ops.push(`q ${n(w)} 0 0 ${n(h)} ${n(dx)} ${n(bottom)} cm /${name} Do Q`);
+    return true;
+  }
 
   /** Serialise. `footer(i, total)` is drawn at the bottom of every page. */
   render(meta: { title: string; footer?: (page: number, total: number) => string }): Uint8Array {

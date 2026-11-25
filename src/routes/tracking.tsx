@@ -3,6 +3,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { z } from "zod";
 import { photoClockLabel } from "@/lib/report-entries";
 import { preparePhoto } from "@/lib/photo-prepare";
+import {
+  LOCAL_PHOTO_MAX_BYTES,
+  LOCAL_PHOTO_MAX_SIDE,
+  type PhotoTimeSource,
+} from "@/lib/photo-upload";
+import {
+  applyParkedIds,
+  logForDisk,
+  parkPhotoBytes,
+  rememberPhoto,
+  requestPersistentStorage,
+  runPhotoBatch,
+} from "@/lib/photo-add";
+import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photo-store";
 import { WorkDayBar } from "@/components/work-day-bar";
 import { PhotoDrop } from "@/components/photo-drop";
 import { PhotoRemoveButton, PhotoUndoToast } from "@/components/photo-thumb";
@@ -23,7 +37,6 @@ import {
   revokeActivityShare,
   updateWorkSession,
 } from "@/lib/server/fns";
-import type { PhotoTimeSource } from "@/lib/photo-upload";
 import {
   formatMinutes,
   mayAddSession,
@@ -46,10 +59,18 @@ type Entry = {
   /** Capture clock when this is a photo: camera time, or file time when there is no EXIF. */
   takenAt?: string | null;
   takenSource?: PhotoTimeSource | null;
+  /** Set once the bytes live in IndexedDB, so the log record itself stays small. */
+  blobId?: string;
 };
 
 type DayLog = Record<string, Entry[]>;
-type StoredSession = { id: string; startMin: number; endMin: number; project: string; notes: string };
+type StoredSession = {
+  id: string;
+  startMin: number;
+  endMin: number;
+  project: string;
+  notes: string;
+};
 type SessionLog = Record<string, StoredSession[]>;
 
 const STORAGE_KEY = "rcl-tracking-log";
@@ -71,7 +92,15 @@ function loadLog(): DayLog {
 }
 
 function saveLog(log: DayLog) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(log));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(logForDisk(log)));
+}
+
+function saveLogQuiet(log: DayLog) {
+  try {
+    saveLog(log);
+  } catch {
+    // Kept on screen. A full phone store is reported on the photo that could not be added.
+  }
 }
 
 function loadSessions(): SessionLog {
@@ -93,8 +122,20 @@ function swatch(label: string, color: string): string {
 }
 
 const SAMPLE_SESSIONS: StoredSession[] = [
-  { id: "ss-a", startMin: 8 * 60, endMin: 11 * 60 + 30, project: "Project A", notes: "demolish fence" },
-  { id: "ss-b", startMin: 13 * 60, endMin: 16 * 60, project: "Project B", notes: "drywall takeoffs" },
+  {
+    id: "ss-a",
+    startMin: 8 * 60,
+    endMin: 11 * 60 + 30,
+    project: "Project A",
+    notes: "demolish fence",
+  },
+  {
+    id: "ss-b",
+    startMin: 13 * 60,
+    endMin: 16 * 60,
+    project: "Project B",
+    notes: "drywall takeoffs",
+  },
 ];
 
 function seedSampleIfEmpty(log: DayLog): DayLog {
@@ -173,7 +214,7 @@ function seedSampleIfEmpty(log: DayLog): DayLog {
     },
   ];
   const next = { ...log, [SAMPLE_DAY]: sample };
-  saveLog(next);
+  saveLogQuiet(next);
   return next;
 }
 
@@ -209,8 +250,32 @@ function applySampleCaptions(log: DayLog): DayLog {
   });
   if (!changed) return log;
   const next = { ...log, [SAMPLE_DAY]: nextDay };
-  saveLog(next);
+  saveLogQuiet(next);
   return next;
+}
+
+async function hydrateLog(log: DayLog): Promise<DayLog> {
+  const out: DayLog = {};
+  for (const [key, entries] of Object.entries(log)) {
+    out[key] = await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.kind !== "photo" || !entry.blobId || entry.dataUrl) return entry;
+        try {
+          const dataUrl = await getPhotoBlob(entry.blobId);
+          return dataUrl ? { ...entry, dataUrl } : entry;
+        } catch {
+          return entry;
+        }
+      }),
+    );
+  }
+  return out;
+}
+
+function logHasInlinePhotos(log: DayLog): boolean {
+  return Object.values(log).some((entries) =>
+    entries.some((entry) => entry.kind === "photo" && entry.dataUrl && !entry.blobId),
+  );
 }
 
 function clock(iso: string): string {
@@ -223,7 +288,8 @@ const PHOTO_FMT = {
     const d = new Date(iso);
     return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
   },
-  shortDay: (iso: string) => new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" }),
+  shortDay: (iso: string) =>
+    new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" }),
 };
 
 /** The time a photo entry shows: camera time, or file time marked as not the camera. */
@@ -273,7 +339,12 @@ async function dataUrlToJpeg(dataUrl: string): Promise<Uint8Array | null> {
 }
 
 export const Route = createFileRoute("/tracking")({
-  validateSearch: z.object({ day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+  validateSearch: z.object({
+    day: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+  }),
   component: TrackingPage,
 });
 
@@ -290,7 +361,10 @@ function TrackingPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
-  const [photoError, setPhotoError] = useState("");
+  const [failedPhotos, setFailedPhotos] = useState<
+    { id: string; name: string; message: string; file: File }[]
+  >([]);
+  const logRef = useRef<DayLog>({});
   const [shareOpen, setShareOpen] = useState(false);
   const [canFileShare, setCanFileShare] = useState(false);
   const [linkToken, setLinkToken] = useState("");
@@ -302,7 +376,9 @@ function TrackingPage() {
   useEffect(() => {
     try {
       const file = new File([new Blob(["%PDF"])], "day.pdf", { type: "application/pdf" });
-      setCanFileShare(typeof navigator.share === "function" && Boolean(navigator.canShare?.({ files: [file] })));
+      setCanFileShare(
+        typeof navigator.share === "function" && Boolean(navigator.canShare?.({ files: [file] })),
+      );
     } catch {
       setCanFileShare(false);
     }
@@ -317,7 +393,15 @@ function TrackingPage() {
   }, [day]);
 
   useEffect(() => {
-    const loaded = applySampleCaptions(seedSampleIfEmpty(loadLog()));
+    let live = true;
+    void requestPersistentStorage(typeof navigator === "undefined" ? null : navigator.storage);
+    let loaded: DayLog = {};
+    try {
+      loaded = applySampleCaptions(seedSampleIfEmpty(loadLog()));
+    } catch {
+      loaded = loadLog();
+    }
+    logRef.current = loaded;
     setLog(loaded);
     const stored = loadSessions();
     if (!stored[SAMPLE_DAY] && loaded[SAMPLE_DAY]) stored[SAMPLE_DAY] = SAMPLE_SESSIONS;
@@ -325,6 +409,39 @@ function TrackingPage() {
     saveSessions(stored);
     if (search.day) setDay(search.day);
     else if (loaded[SAMPLE_DAY] && !loaded[todayKey()]) setDay(SAMPLE_DAY);
+    void (async () => {
+      try {
+        let current = logRef.current;
+        if (logHasInlinePhotos(current)) {
+          const parked = await parkPhotoBytes(current, putPhotoBlob);
+          if (!live) return;
+          current = applyParkedIds(logRef.current, parked);
+          saveLogQuiet(current);
+          logRef.current = current;
+          setLog(current);
+        }
+        const hydrated = await hydrateLog(logRef.current);
+        if (!live) return;
+        const urls = new Map<string, string>();
+        for (const entries of Object.values(hydrated))
+          for (const entry of entries) if (entry.dataUrl) urls.set(entry.id, entry.dataUrl);
+        const merged: DayLog = {};
+        for (const [key, entries] of Object.entries(logRef.current)) {
+          merged[key] = entries.map((entry) =>
+            entry.dataUrl || !urls.has(entry.id)
+              ? entry
+              : { ...entry, dataUrl: urls.get(entry.id) },
+          );
+        }
+        logRef.current = merged;
+        setLog(merged);
+      } catch {
+        // Leave the log on screen. Adding a photo reports a full store on that photo.
+      }
+    })();
+    return () => {
+      live = false;
+    };
   }, [search.day]);
 
   const allDays = useMemo(() => {
@@ -375,7 +492,11 @@ function TrackingPage() {
           return;
         }
         setRole(desk.profile.role);
-        setJobs(desk.projects.filter((job) => !job.archived).map((job) => ({ id: job.id, name: job.name })));
+        setJobs(
+          desk.projects
+            .filter((job) => !job.archived)
+            .map((job) => ({ id: job.id, name: job.name })),
+        );
         const scope = mayReviewSessions(desk.profile.role) ? "company" : "mine";
         const rows = await listWorkSessions({ data: { day, scope } });
         if (live) setServerSessions(rows);
@@ -413,9 +534,10 @@ function TrackingPage() {
       lat: loc?.lat,
       lng: loc?.lng,
     };
-    const next = { ...log, [day]: [...(log[day] ?? []), entry] };
+    const next = { ...logRef.current, [day]: [...(logRef.current[day] ?? []), entry] };
+    logRef.current = next;
     setLog(next);
-    saveLog(next);
+    saveLogQuiet(next);
   }
 
   function addLunch() {
@@ -424,34 +546,61 @@ function TrackingPage() {
   }
 
   async function addPhotos(files: File[]) {
+    void requestPersistentStorage(typeof navigator === "undefined" ? null : navigator.storage);
     setPhotoBusy(true);
-    setPhotoError("");
-    const added: Entry[] = [];
-    const errors: string[] = [];
-    for (const file of files) {
-      try {
-        const photo = await preparePhoto(file);
-        added.push({
-          id: crypto.randomUUID(),
-          ts: new Date().toISOString(),
-          kind: "photo",
-          body: "",
-          dataUrl: photo.image,
-          project: activeProject || undefined,
-          takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
-          takenSource: photo.takenSource,
-        });
-      } catch (cause) {
-        errors.push(cause instanceof Error ? cause.message : "Couldn't read that photo.");
+    try {
+      const outcome = await runPhotoBatch({
+        files: files.map((file) => ({
+          name: file.name || "Photo",
+          prepare: () =>
+            preparePhoto(file, { maxSide: LOCAL_PHOTO_MAX_SIDE, maxBytes: LOCAL_PHOTO_MAX_BYTES }),
+        })),
+        owner: true,
+        role,
+        save: async (photo) => {
+          const entry: Entry = {
+            id: crypto.randomUUID(),
+            ts: new Date().toISOString(),
+            kind: "photo",
+            body: "",
+            dataUrl: photo.image,
+            project: activeProject || undefined,
+            takenAt: photo.takenSource === "file" ? photo.fileTime : photo.takenAt,
+            takenSource: photo.takenSource,
+          };
+          const next = await rememberPhoto(logRef.current, day, entry, {
+            save: saveLog,
+            putBlob: putPhotoBlob,
+            deleteBlob: deletePhotoBlob,
+            read: () => logRef.current,
+          });
+          logRef.current = next;
+          setLog(next);
+        },
+      });
+      if (outcome.failed.length) {
+        setFailedPhotos((current) => [
+          ...current,
+          ...outcome.failed.map((fail) => ({
+            id: crypto.randomUUID(),
+            name: fail.name,
+            message: fail.message,
+            file: files[fail.index],
+          })),
+        ]);
       }
+    } finally {
+      setPhotoBusy(false);
     }
-    if (added.length) {
-      const next = { ...log, [day]: [...(log[day] ?? []), ...added] };
-      setLog(next);
-      saveLog(next);
-    }
-    setPhotoError(errors[0] ?? "");
-    setPhotoBusy(false);
+  }
+
+  function retryFailed(item: { id: string; file: File }) {
+    setFailedPhotos((current) => current.filter((fail) => fail.id !== item.id));
+    void addPhotos([item.file]);
+  }
+
+  function removeFailed(id: string) {
+    setFailedPhotos((current) => current.filter((fail) => fail.id !== id));
   }
 
   const heldPhoto = useRef<{ id: string; timer: number } | null>(null);
@@ -464,9 +613,15 @@ function TrackingPage() {
 
   function forgetPhoto(id: string) {
     setLog((current) => {
+      let blobId = "";
       const next: DayLog = {};
-      for (const [key, list] of Object.entries(current)) next[key] = list.filter((entry) => entry.id !== id);
-      saveLog(next);
+      for (const [key, list] of Object.entries(current)) {
+        for (const entry of list) if (entry.id === id && entry.blobId) blobId = entry.blobId;
+        next[key] = list.filter((entry) => entry.id !== id);
+      }
+      logRef.current = next;
+      saveLogQuiet(next);
+      if (blobId) void deletePhotoBlob(blobId);
       return next;
     });
     setHiddenPhotos((current) => {
@@ -507,11 +662,14 @@ function TrackingPage() {
 
   function setCaption(id: string, body: string) {
     const next = {
-      ...log,
-      [day]: (log[day] ?? []).map((entry) => (entry.id === id ? { ...entry, body: body.slice(0, MAX_CAPTION) } : entry)),
+      ...logRef.current,
+      [day]: (logRef.current[day] ?? []).map((entry) =>
+        entry.id === id ? { ...entry, body: body.slice(0, MAX_CAPTION) } : entry,
+      ),
     };
+    logRef.current = next;
     setLog(next);
-    saveLog(next);
+    saveLogQuiet(next);
   }
 
   function writeSessions(next: SessionLog) {
@@ -519,7 +677,13 @@ function TrackingPage() {
     saveSessions(next);
   }
 
-  function saveLocal(input: { id?: string; projectName: string; startMin: number; endMin: number; notes: string }) {
+  function saveLocal(input: {
+    id?: string;
+    projectName: string;
+    startMin: number;
+    endMin: number;
+    notes: string;
+  }) {
     const row: StoredSession = {
       id: input.id ?? crypto.randomUUID(),
       startMin: input.startMin,
@@ -528,21 +692,43 @@ function TrackingPage() {
       notes: input.notes,
     };
     const list = sessions[day] ?? [];
-    writeSessions({ ...sessions, [day]: input.id ? list.map((item) => (item.id === input.id ? row : item)) : [...list, row] });
+    writeSessions({
+      ...sessions,
+      [day]: input.id ? list.map((item) => (item.id === input.id ? row : item)) : [...list, row],
+    });
   }
 
   function deleteLocal(id: string) {
     writeSessions({ ...sessions, [day]: (sessions[day] ?? []).filter((item) => item.id !== id) });
   }
 
-  async function saveServer(input: { id?: string; projectId: string | null; startMin: number; endMin: number; notes: string }) {
+  async function saveServer(input: {
+    id?: string;
+    projectId: string | null;
+    startMin: number;
+    endMin: number;
+    notes: string;
+  }) {
     if (!input.projectId) throw new Error("Choose a project.");
     const saved = input.id
       ? await updateWorkSession({
-          data: { id: input.id, day, projectId: input.projectId, startMin: input.startMin, endMin: input.endMin, notes: input.notes },
+          data: {
+            id: input.id,
+            day,
+            projectId: input.projectId,
+            startMin: input.startMin,
+            endMin: input.endMin,
+            notes: input.notes,
+          },
         })
       : await createWorkSession({
-          data: { day, projectId: input.projectId, startMin: input.startMin, endMin: input.endMin, notes: input.notes },
+          data: {
+            day,
+            projectId: input.projectId,
+            startMin: input.startMin,
+            endMin: input.endMin,
+            notes: input.notes,
+          },
         });
     setServerSessions((list) => {
       const next = (list ?? []).filter((session) => session.id !== saved.id);
@@ -558,9 +744,10 @@ function TrackingPage() {
 
   function ensureDay(next: string) {
     if (next && !log[next]) {
-      const updated = { ...log, [next]: [] as Entry[] };
+      const updated = { ...logRef.current, [next]: [] as Entry[] };
+      logRef.current = updated;
       setLog(updated);
-      saveLog(updated);
+      saveLogQuiet(updated);
     }
   }
 
@@ -573,23 +760,40 @@ function TrackingPage() {
       if (e.kind === "photo") {
         return {
           kind: "photo",
-          captionTime: photoCaptionHeading({ takenAt: e.takenAt, takenSource: e.takenSource }, clock),
+          captionTime: photoCaptionHeading(
+            { takenAt: e.takenAt, takenSource: e.takenSource },
+            clock,
+          ),
           caption: e.body ?? "",
           project: e.project,
           jpeg: jpegs.get(e.id) ?? null,
         };
       }
-      const loc = e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
+      const loc =
+        e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(5)}, ${e.lng.toFixed(5)}` : "";
       const label = e.kind === "project" ? "Project" : e.kind === "lunch" ? "Lunch" : "Note";
-      return { kind: e.kind, stamp: `${clock(e.ts)}${loc} · ${label}`, body: e.body ?? "", project: e.project };
+      return {
+        kind: e.kind,
+        stamp: `${clock(e.ts)}${loc} · ${label}`,
+        body: e.body ?? "",
+        project: e.project,
+      };
     });
     const pdf = buildActivityPdf({
       dayKey: day,
-      dayLabel: new Date(day + "T12:00:00").toLocaleDateString([], { weekday: "long", month: "short", day: "numeric", year: "numeric" }),
+      dayLabel: new Date(day + "T12:00:00").toLocaleDateString([], {
+        weekday: "long",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }),
       items,
       sessions: visibleSessions,
     });
-    return { blob: new Blob([pdf as BlobPart], { type: "application/pdf" }), name: `tracking-${day}.pdf` };
+    return {
+      blob: new Blob([pdf as BlobPart], { type: "application/pdf" }),
+      name: `tracking-${day}.pdf`,
+    };
   }
 
   function savePdf(blob: Blob, name: string) {
@@ -652,7 +856,8 @@ function TrackingPage() {
       if (mine?.token) setLinkToken(mine.token);
     } catch (cause) {
       const message = shareFailure(cause);
-      if (!message) setShareNote("Sign in to create a private link. Download saves the PDF on this device.");
+      if (!message)
+        setShareNote("Sign in to create a private link. Download saves the PDF on this device.");
       else setShareError(message);
     }
   }
@@ -690,7 +895,8 @@ function TrackingPage() {
       setShareCheckedDay(day);
     } catch (cause) {
       const message = shareFailure(cause);
-      if (!message) setShareNote("Sign in to create a private link. Download saves the PDF on this device.");
+      if (!message)
+        setShareNote("Sign in to create a private link. Download saves the PDF on this device.");
       else setShareError(message);
     } finally {
       setExportBusy(false);
@@ -732,7 +938,8 @@ function TrackingPage() {
     <main className="relative mx-auto max-w-lg px-4 pb-28 pt-8">
       <h1 className="mb-2 text-2xl font-semibold">Activity log</h1>
       <p className="mb-4 text-sm text-muted">
-        Day-by-day tracking. Everything stays in this browser. See the sample day, then start your own.
+        Day-by-day tracking. Everything stays in this browser. See the sample day, then start your
+        own.
       </p>
 
       <div className="mb-4">
@@ -757,7 +964,9 @@ function TrackingPage() {
                 href={`/tracking?day=${d}`}
                 onClick={() => ensureDay(d)}
                 className={`shrink-0 rounded-full border px-3 py-1 text-xs no-underline ${
-                  d === day ? "border-green-600 bg-green-600 text-white" : "border-line bg-raised text-fg"
+                  d === day
+                    ? "border-green-600 bg-green-600 text-white"
+                    : "border-line bg-raised text-fg"
                 }`}
               >
                 {formatDayLabel(d)}
@@ -771,7 +980,8 @@ function TrackingPage() {
 
       {isSample && (
         <div className="mb-4 rounded border border-dashed border-green-600/40 bg-green-600/5 p-3 text-sm">
-          This is a sample day. Hours worked are the lettered sessions. Add or edit one to change the green bar.
+          This is a sample day. Hours worked are the lettered sessions. Add or edit one to change
+          the green bar.
         </div>
       )}
 
@@ -797,10 +1007,39 @@ function TrackingPage() {
       <div className="mt-4">
         <PhotoDrop busy={photoBusy} onFiles={(files) => void addPhotos(files)} />
       </div>
-      {photoError ? (
-        <p className="mt-3 text-sm text-danger" role="alert">
-          {photoError}
-        </p>
+      {failedPhotos.length > 0 ? (
+        <ul className="mt-3 grid gap-2">
+          {failedPhotos.map((fail) => (
+            <li
+              key={fail.id}
+              data-testid="photo-failed"
+              role="alert"
+              className="rounded border border-line bg-raised p-3"
+            >
+              <p className="truncate text-sm font-medium">{fail.name}</p>
+              <p className="mt-1 text-sm text-danger">{fail.message}</p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  data-testid="photo-retry"
+                  className="h-11 rounded-md bg-[#1f8a4c] px-4 text-sm font-semibold text-white disabled:opacity-60"
+                  disabled={photoBusy}
+                  onClick={() => retryFailed(fail)}
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  data-testid="photo-failed-remove"
+                  className="h-11 rounded-md border border-line px-4 text-sm"
+                  onClick={() => removeFailed(fail.id)}
+                >
+                  Remove
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       {dayPhotos.length > 0 ? (
@@ -833,37 +1072,52 @@ function TrackingPage() {
 
       <div className="mb-6 mt-4 space-y-3">
         {entries.length === 0 ? (
-          <p className="text-muted">No entries for this day yet. Drop photos above, or use the green button for a note or lunch.</p>
+          <p className="text-muted">
+            No entries for this day yet. Drop photos above, or use the green button for a note or
+            lunch.
+          </p>
         ) : (
           entries.map((e) =>
             e.kind === "photo" ? (
               !onPage.has(e.id) || hiddenPhotos.has(e.id) ? null : (
-              <figure key={e.id} className="rounded border border-line bg-raised p-3" data-testid="photo-caption">
-                {e.project ? <p className="mb-1 text-xs text-muted">{e.project}</p> : null}
-                <div className="relative">
-                  {e.dataUrl ? <img src={e.dataUrl} alt="" className="max-h-48 rounded" /> : null}
-                  <PhotoRemoveButton onRemove={() => removePhotoEntry(e.id)} />
-                </div>
-                <figcaption className="mt-2">
-                  <p className="text-sm font-medium tabular-nums" data-testid="photo-caption-time">
-                    {photoCaptionHeading({ takenAt: e.takenAt, takenSource: e.takenSource }, clock) || "Time not recorded"}
-                  </p>
-                  <textarea
-                    className="field mt-1"
-                    maxLength={MAX_CAPTION}
-                    placeholder="Add a caption"
-                    aria-label="Caption"
-                    value={e.body ?? ""}
-                    onChange={(event) => setCaption(e.id, event.target.value)}
-                  />
-                </figcaption>
-              </figure>
+                <figure
+                  key={e.id}
+                  className="rounded border border-line bg-raised p-3"
+                  data-testid="photo-caption"
+                >
+                  {e.project ? <p className="mb-1 text-xs text-muted">{e.project}</p> : null}
+                  <div className="relative">
+                    {e.dataUrl ? <img src={e.dataUrl} alt="" className="max-h-48 rounded" /> : null}
+                    <PhotoRemoveButton onRemove={() => removePhotoEntry(e.id)} />
+                  </div>
+                  <figcaption className="mt-2">
+                    <p
+                      className="text-sm font-medium tabular-nums"
+                      data-testid="photo-caption-time"
+                    >
+                      {photoCaptionHeading(
+                        { takenAt: e.takenAt, takenSource: e.takenSource },
+                        clock,
+                      ) || "Time not recorded"}
+                    </p>
+                    <textarea
+                      className="field mt-1"
+                      maxLength={MAX_CAPTION}
+                      placeholder="Add a caption"
+                      aria-label="Caption"
+                      value={e.body ?? ""}
+                      onChange={(event) => setCaption(e.id, event.target.value)}
+                    />
+                  </figcaption>
+                </figure>
               )
             ) : (
               <div key={e.id} className="rounded border border-line bg-raised p-3">
                 <div className="mb-1 text-xs text-muted">
                   {photoWhen(e)}
-                  {e.lat != null && e.lng != null ? ` · ${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}` : ""}
+                  {e.lat != null && e.lng != null
+                    ? ` · ${e.lat.toFixed(4)}, ${e.lng.toFixed(4)}`
+                    : ""}
                   {e.project ? ` · ${e.project}` : ""}
                 </div>
                 <p className="whitespace-pre-wrap">{e.body}</p>
@@ -878,7 +1132,11 @@ function TrackingPage() {
           <h2 className="mb-3 text-sm font-semibold">Project time</h2>
           <div className="space-y-2">
             {projectTimes.map((pt) => (
-              <div key={pt.project} className="flex items-center justify-between text-sm" data-testid="project-time-row">
+              <div
+                key={pt.project}
+                className="flex items-center justify-between text-sm"
+                data-testid="project-time-row"
+              >
                 <span>{pt.project}</span>
                 <span className="tabular-nums" data-testid="project-time-amount">
                   {formatMinutes(pt.minutes)}
@@ -898,7 +1156,11 @@ function TrackingPage() {
         busy={exportBusy}
         shareOpen={shareOpen}
         canFileShare={canFileShare}
-        linkUrl={linkToken ? `${typeof window === "undefined" ? "" : window.location.origin}/share/${linkToken}` : ""}
+        linkUrl={
+          linkToken
+            ? `${typeof window === "undefined" ? "" : window.location.origin}/share/${linkToken}`
+            : ""
+        }
         note={shareNote}
         error={shareError}
         copied={copied}
@@ -935,7 +1197,9 @@ function TrackingPage() {
         </div>
       )}
 
-      {photoUndo ? <PhotoUndoToast onUndo={undoPhotoRemoval} className="fixed bottom-28 left-4 z-40" /> : null}
+      {photoUndo ? (
+        <PhotoUndoToast onUndo={undoPhotoRemoval} className="fixed bottom-28 left-4 z-40" />
+      ) : null}
       <div className="fixed bottom-6 right-6 z-50">
         <button
           type="button"

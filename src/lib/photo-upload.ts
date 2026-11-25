@@ -10,6 +10,25 @@ export const MAX_STORED_BYTES = 3 * 1024 * 1024;
 /** Stored photos are at most this many pixels on the long side, then these JPEG qualities in turn. */
 export const STORED_MAX_SIDE = 1600;
 export const QUALITY_LADDER = [0.82, 0.72, 0.6, 0.5] as const;
+/**
+ * The activity log lives in the phone's own storage, which is much smaller than the server
+ * upload cap. New log photos are downscaled to this budget before anything is written.
+ */
+export const LOCAL_PHOTO_MAX_SIDE = 1280;
+export const LOCAL_PHOTO_MAX_BYTES = 280 * 1024;
+
+/** Sides to try, largest first, never above the caller's cap. The last steps are for a full phone. */
+export function prepareSteps(
+  maxSide = STORED_MAX_SIDE,
+  maxBytes = MAX_STORED_BYTES,
+): { side: number; maxBytes: number }[] {
+  const sides: number[] = [];
+  for (const side of [maxSide, 1024, 800, 640]) {
+    const capped = Math.min(maxSide, side);
+    if (capped >= 320 && !sides.includes(capped)) sides.push(capped);
+  }
+  return sides.map((side) => ({ side, maxBytes }));
+}
 
 export function tooLargeMessage(size: number): string | null {
   if (size <= MAX_UPLOAD_BYTES) return null;
@@ -28,7 +47,13 @@ export function isPhotoFile(file: { type?: string; name?: string }): boolean {
 /** HEIC/HEIF (iPhone photos): by type, by extension, or by the "ftyp" brand in the first bytes. */
 export function isHeic(file: { type?: string; name?: string }, head?: Uint8Array): boolean {
   const type = (file.type ?? "").toLowerCase();
-  if (type === "image/heic" || type === "image/heif" || type === "image/heic-sequence" || type === "image/heif-sequence") return true;
+  if (
+    type === "image/heic" ||
+    type === "image/heif" ||
+    type === "image/heic-sequence" ||
+    type === "image/heif-sequence"
+  )
+    return true;
   if (/\.(heic|heif)$/i.test(file.name ?? "")) return true;
   if (head && head.length >= 12) {
     const box = String.fromCharCode(...head.subarray(4, 8));
@@ -49,7 +74,10 @@ export function dataUrlBytes(url: string): number {
  * Encode with each quality in turn until it fits the stored-size limit (e.g. a very detailed
  * 1600 px photo at 0.82). Returns the first that fits, or null if none does.
  */
-export function firstThatFits<T extends { url: string }>(encode: (quality: number) => T, max = MAX_STORED_BYTES): T | null {
+export function firstThatFits<T extends { url: string }>(
+  encode: (quality: number) => T,
+  max = MAX_STORED_BYTES,
+): T | null {
   for (const q of QUALITY_LADDER) {
     const out = encode(q);
     if (dataUrlBytes(out.url) <= max) return out;
@@ -116,7 +144,11 @@ function boxes(bytes: Uint8Array, start: number, end: number): Box[] {
       header = 16;
     } else if (size === 0) size = end - i;
     if (size < header || i + size > end) break;
-    out.push({ type: String.fromCharCode(bytes[i + 4], bytes[i + 5], bytes[i + 6], bytes[i + 7]), payload: i + header, end: i + size });
+    out.push({
+      type: String.fromCharCode(bytes[i + 4], bytes[i + 5], bytes[i + 6], bytes[i + 7]),
+      payload: i + header,
+      end: i + size,
+    });
     i += size;
   }
   return out;
@@ -193,7 +225,14 @@ function tiffFromExifPayload(payload: Uint8Array): ExifTime | null {
     }
   }
   for (let i = 0; i + 14 < payload.length && i < 64; i += 1) {
-    if (payload[i] === 0x45 && payload[i + 1] === 0x78 && payload[i + 2] === 0x69 && payload[i + 3] === 0x66 && payload[i + 4] === 0 && payload[i + 5] === 0) {
+    if (
+      payload[i] === 0x45 &&
+      payload[i + 1] === 0x78 &&
+      payload[i + 2] === 0x69 &&
+      payload[i + 3] === 0x66 &&
+      payload[i + 4] === 0 &&
+      payload[i + 5] === 0
+    ) {
       const hit = readTiff(payload.subarray(i + 6));
       if (hit) return hit;
     }
@@ -225,7 +264,15 @@ function heifExif(bytes: Uint8Array): ExifTime | null {
   // Declared somewhere the iloc walk didn't reach: the Exif marker plus a TIFF header.
   const limit = Math.min(bytes.length, 8 * 1024 * 1024);
   for (let i = 0; i + 14 < limit; i += 1) {
-    if (bytes[i] !== 0x45 || bytes[i + 1] !== 0x78 || bytes[i + 2] !== 0x69 || bytes[i + 3] !== 0x66 || bytes[i + 4] !== 0 || bytes[i + 5] !== 0) continue;
+    if (
+      bytes[i] !== 0x45 ||
+      bytes[i + 1] !== 0x78 ||
+      bytes[i + 2] !== 0x69 ||
+      bytes[i + 3] !== 0x66 ||
+      bytes[i + 4] !== 0 ||
+      bytes[i + 5] !== 0
+    )
+      continue;
     const hit = readTiff(bytes.subarray(i + 6, Math.min(bytes.length, i + 6 + 65536)));
     if (hit) return hit;
   }
@@ -236,9 +283,14 @@ function readTiff(t: Uint8Array): ExifTime | null {
   if (t.length < 8) return null;
   const little = t[0] === 0x49 && t[1] === 0x49;
   if (!little && !(t[0] === 0x4d && t[1] === 0x4d)) return null;
-  const u16 = (o: number) => (o + 2 > t.length ? -1 : little ? t[o] | (t[o + 1] << 8) : (t[o] << 8) | t[o + 1]);
+  const u16 = (o: number) =>
+    o + 2 > t.length ? -1 : little ? t[o] | (t[o + 1] << 8) : (t[o] << 8) | t[o + 1];
   const u32 = (o: number) =>
-    o + 4 > t.length ? -1 : little ? (t[o] | (t[o + 1] << 8) | (t[o + 2] << 16)) + t[o + 3] * 0x1000000 : t[o] * 0x1000000 + ((t[o + 1] << 16) | (t[o + 2] << 8) | t[o + 3]);
+    o + 4 > t.length
+      ? -1
+      : little
+        ? (t[o] | (t[o + 1] << 8) | (t[o + 2] << 16)) + t[o + 3] * 0x1000000
+        : t[o] * 0x1000000 + ((t[o + 1] << 16) | (t[o + 2] << 8) | t[o + 3]);
   const tags = (ifd: number) => {
     const out = new Map<number, number>();
     const n = u16(ifd);
@@ -256,7 +308,9 @@ function readTiff(t: Uint8Array): ExifTime | null {
     if (count <= 0 || count > 64) return null;
     const at = count <= 4 ? entry + 8 : u32(entry + 8);
     if (at < 0 || at + count > t.length) return null;
-    return String.fromCharCode(...t.subarray(at, at + count)).replace(/\0+$/, "").trim();
+    return String.fromCharCode(...t.subarray(at, at + count))
+      .replace(/\0+$/, "")
+      .trim();
   };
   const ifd0 = tags(u32(4));
   const exifPtr = ifd0.get(0x8769);
@@ -281,7 +335,8 @@ export function exifIso(time: ExifTime | null): string | null {
 export function plausibleTakenAt(iso: string | null, now = Date.now()): string | null {
   if (!iso) return null;
   const t = Date.parse(iso);
-  if (Number.isNaN(t) || t < Date.parse("2000-01-01T00:00:00Z") || t > now + 86_400_000) return null;
+  if (Number.isNaN(t) || t < Date.parse("2000-01-01T00:00:00Z") || t > now + 86_400_000)
+    return null;
   return new Date(t).toISOString();
 }
 
@@ -297,13 +352,17 @@ export function resolvePhotoClock(
 ): { at: string; source: PhotoTimeSource } | null {
   const exif = plausibleTakenAt(input.exif, now);
   if (exif) return { at: exif, source: "exif" };
-  if (input.lastModified == null || !Number.isFinite(input.lastModified) || input.lastModified <= 0) return null;
+  if (input.lastModified == null || !Number.isFinite(input.lastModified) || input.lastModified <= 0)
+    return null;
   const file = plausibleTakenAt(new Date(input.lastModified).toISOString(), now);
   return file ? { at: file, source: "file" } : null;
 }
 
 /** Camera time stays in `takenAt`. A file-modified fallback is `fileTime` and is never called "taken". */
-export function splitPhotoClock(takenAt: string | null, source: string | null): { takenAt: string | null; fileTime: string | null } {
+export function splitPhotoClock(
+  takenAt: string | null,
+  source: string | null,
+): { takenAt: string | null; fileTime: string | null } {
   if (!takenAt) return { takenAt: null, fileTime: null };
   if (source === "file") return { takenAt: null, fileTime: takenAt };
   return { takenAt, fileTime: null };
@@ -313,7 +372,11 @@ export function splitPhotoClock(takenAt: string | null, source: string | null): 
  * What a photo upload stores. An unlabeled time is the camera (older clients).
  * File time is stored only when the client marks it as such.
  */
-export function storedPhotoClock(input: { takenAt: string; fileTime: string; takenSource: string }): { at: string | null; source: PhotoTimeSource | null } {
+export function storedPhotoClock(input: {
+  takenAt: string;
+  fileTime: string;
+  takenSource: string;
+}): { at: string | null; source: PhotoTimeSource | null } {
   if (input.takenSource === "file") {
     const file = plausibleTakenAt(input.fileTime || input.takenAt);
     return file ? { at: file, source: "file" } : { at: null, source: null };
