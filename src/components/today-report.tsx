@@ -501,7 +501,10 @@ export function TodayReport() {
         />
         {!submitted ? (
           // Sticks above the phone tab bar so the plus stays under the thumb while scrolling.
-          <div className="sticky bottom-[calc(5rem+env(safe-area-inset-bottom))] z-20 mt-4 md:bottom-4" data-testid="add-bar">
+          <div
+            className="z-20 mt-4 max-md:fixed max-md:inset-x-4 max-md:bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:sticky md:bottom-4"
+            data-testid="add-bar"
+          >
             {menuOpen ? (
               <div
                 role="menu"
