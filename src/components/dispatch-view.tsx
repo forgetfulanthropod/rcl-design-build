@@ -21,6 +21,7 @@ import {
   undoDispatchSend,
   updateDispatchLocation,
 } from "@/lib/server/fns";
+import { DispatchMap } from "@/components/dispatch-map";
 import { Button, Chip, EmptyState, ErrorBanner, Skeleton } from "@/components/ui";
 import { useDesk } from "@/components/desk-context";
 import { can } from "@/lib/permissions";
@@ -224,7 +225,7 @@ function SendDock({
 export function DispatchView() {
   const { ready } = useDesk();
   const role = ready.profile.role;
-  const [mode, setMode] = useState<"day" | "week">("day");
+  const [mode, setMode] = useState<"day" | "week" | "map">("day");
   const [day, setDay] = useState(() => todayIso());
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState("");
@@ -366,6 +367,7 @@ export function DispatchView() {
     >
       <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto pb-2" data-testid="dispatch-scroll">
       <div className="grid gap-2">
+        {mode === "map" ? null : (
         <div className="flex items-center gap-2 md:hidden">
           <button
             type="button"
@@ -400,12 +402,13 @@ export function DispatchView() {
             Today
           </button>
         </div>
+        )}
         <div
           className="flex w-full rounded-md border border-line p-1 md:hidden"
           role="tablist"
           aria-label="Dispatch view"
         >
-          {(["day", "week"] as const).map((id) => (
+          {(["day", "week", "map"] as const).map((id) => (
             <button
               key={id}
               type="button"
@@ -415,7 +418,7 @@ export function DispatchView() {
               className={`h-11 flex-1 rounded-md text-sm font-medium ${mode === id ? GOLD : "text-muted"}`}
               onClick={() => setMode(id)}
             >
-              {id === "day" ? "Day" : "Week"}
+              {id === "day" ? "Day" : id === "week" ? "Week" : "Map"}
             </button>
           ))}
         </div>
@@ -425,7 +428,7 @@ export function DispatchView() {
             role="tablist"
             aria-label="Dispatch view"
           >
-            {(["day", "week"] as const).map((id) => (
+            {(["day", "week", "map"] as const).map((id) => (
               <button
                 key={id}
                 type="button"
@@ -435,36 +438,40 @@ export function DispatchView() {
                 className={`h-11 rounded-md px-4 text-sm font-medium ${mode === id ? GOLD : "text-muted"}`}
                 onClick={() => setMode(id)}
               >
-                {id === "day" ? "Day" : "Week"}
+                {id === "day" ? "Day" : id === "week" ? "Week" : "Map"}
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
-            aria-label={mode === "week" ? "Previous week" : "Previous day"}
-            onClick={() => setDay((current) => addDays(current, -step))}
-          >
-            <ChevronLeft className="size-5" aria-hidden />
-          </button>
-          <p className="min-w-[10rem] text-center font-display text-lg" data-testid="dispatch-when">
-            {mode === "week" ? formatDispatchWeek(weekStart(day)) : formatDispatchDay(day)}
-          </p>
-          <button
-            type="button"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
-            aria-label={mode === "week" ? "Next week" : "Next day"}
-            onClick={() => setDay((current) => addDays(current, step))}
-          >
-            <ChevronRight className="size-5" aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="h-11 rounded-md border border-line px-3 text-sm"
-            onClick={() => setDay(todayIso())}
-          >
-            Today
-          </button>
+          {mode === "map" ? null : (
+            <>
+              <button
+                type="button"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
+                aria-label={mode === "week" ? "Previous week" : "Previous day"}
+                onClick={() => setDay((current) => addDays(current, -step))}
+              >
+                <ChevronLeft className="size-5" aria-hidden />
+              </button>
+              <p className="min-w-[10rem] text-center font-display text-lg" data-testid="dispatch-when">
+                {mode === "week" ? formatDispatchWeek(weekStart(day)) : formatDispatchDay(day)}
+              </p>
+              <button
+                type="button"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-line"
+                aria-label={mode === "week" ? "Next week" : "Next day"}
+                onClick={() => setDay((current) => addDays(current, step))}
+              >
+                <ChevronRight className="size-5" aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="h-11 rounded-md border border-line px-3 text-sm"
+                onClick={() => setDay(todayIso())}
+              >
+                Today
+              </button>
+            </>
+          )}
         </div>
         {showing && !showing.canEdit ? (
           <p className="text-sm text-muted" data-testid="dispatch-readonly">
@@ -475,6 +482,8 @@ export function DispatchView() {
 
       {error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
       {!showing && !error ? <Skeleton lines={6} label="Loading dispatch" /> : null}
+
+      {showing && mode === "map" ? <DispatchMap /> : null}
 
       {showing && mode === "day" ? (
         <DayBoard
@@ -651,7 +660,7 @@ export function DispatchView() {
           </button>
         </p>
       ) : null}
-      {showing ? (
+      {showing && mode !== "map" ? (
         <SendDock
           day={day}
           send={showing.send}
