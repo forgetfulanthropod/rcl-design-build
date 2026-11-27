@@ -1049,6 +1049,33 @@ function dispatchDay(value: unknown): string {
   return day;
 }
 
+export const getDispatchMap = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => {
+    const { getMap } = await import("./dispatch-map.server");
+    return getMap(context.userId);
+  });
+
+export const assignDispatchCrew = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((input: { projectId: string; day: string; userIds: string[] }) => ({
+    projectId: required(input?.projectId, 80, "Job"),
+    day: dayArg(input?.day),
+    userIds: personIds(input?.userIds),
+  }))
+  .handler(async ({ context, data }) => {
+    const { assignCrew } = await import("./dispatch-map.server");
+    return assignCrew(context.userId, data);
+  });
+
+function personIds(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error("Pick at least one person.");
+  const ids = [...new Set(value.map((id) => required(id, 80, "Person")))];
+  if (ids.length < 1) throw new Error("Pick at least one person.");
+  if (ids.length > 24) throw new Error("Pick at most 24 people.");
+  return ids;
+}
+
 export const getDispatch = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((input: { day?: string } = {}) => ({ day: dispatchDay(input?.day) || undefined }))
